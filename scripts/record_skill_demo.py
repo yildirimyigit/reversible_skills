@@ -63,7 +63,7 @@ def stack_trajectory(frames):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out_dir", type=str, default="/workspace/data/stackblocks_demos")
-    ap.add_argument("--n", type=int, default=5, help="number of demos to record")
+    ap.add_argument("--n", type=int, default=1, help="number of demos to record")
     ap.add_argument("--variation", type=int, default=0)
     ap.add_argument("--headless", action="store_true", default=True)
     ap.add_argument("--img", type=int, default=128, help="camera image size (square)")
