@@ -12,6 +12,8 @@ XORG_LOG="/tmp/Xorg.99.log"
 
 SCRIPTS_HOST="/home/yigit/projects/inverse/reversible_skills/scripts"
 SCRIPTS_CONT="/workspace/scripts"
+DATA_HOST="/home/yigit/projects/inverse/reversible_skills/data"
+DATA_CONT="/workspace/data"
 
 # ---------------------------
 # Helpers
@@ -73,6 +75,7 @@ run_container() {
     -e NVIDIA_DRIVER_CAPABILITIES=graphics,utility,compute \
     -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
     -v "${SCRIPTS_HOST}:${SCRIPTS_CONT}:rw" \
+    -v "${DATA_HOST}:${DATA_CONT}:rw" \
     "${IMAGE}"
 }
 
