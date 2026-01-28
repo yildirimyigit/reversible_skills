@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
     libglib2.0-0 \
     libsm6 libxrender1 libxext6 libxi6 libxrandr2 libxinerama1 libxcursor1 \
     libxkbcommon-x11-0 \
-    nano \
+    nano python-is-python3 \
     libx11-xcb1 libxcb1 libxcb-randr0 libxcb-xinerama0 libxcb-icccm4 libxcb-image0 \
     libxcb-keysyms1 libxcb-render-util0 libxcb-xkb1 libxcb-cursor0 \
     libfontconfig1 libfreetype6 libdbus-1-3 \
