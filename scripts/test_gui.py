@@ -21,7 +21,7 @@ task = env.get_task(StackBlocks)
 task.set_variation(0)
 
 print("Generating + running 1 live expert demo...")
-_ = task.get_demos(amount=1, live_demos=True)  # runs the demo in the sim :contentReference[oaicite:1]{index=1}
+_ = task.get_demos(amount=1, live_demos=True)  # runs the demo in the sim
 
 input("Demo finished. Press Enter to close...")
 env.shutdown()
