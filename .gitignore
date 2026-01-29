@@ -1,4 +1,6 @@
 *.npy
 *.npz
+*.avi
+*mp4
 PyRep/
 RLBench/
