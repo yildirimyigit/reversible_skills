@@ -6,4 +6,5 @@ docker run --rm -it --gpus all --net=host --name="rlbench" \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   -v /home/yigit/projects/inverse/reversible_skills/scripts:/workspace/scripts:rw \
   -v /home/yigit/projects/inverse/reversible_skills/data:/workspace/data:rw \
+  -v /home/yigit/projects/inverse/reversible_skills/config:/workspace/config:rw \
   rlbench:20.04-gpu
