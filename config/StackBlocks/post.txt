@@ -1,0 +1,1 @@
+{on(red_block_1, table), on(red_block_2, red_block_1), stable(red_block_2, red_block_1)}

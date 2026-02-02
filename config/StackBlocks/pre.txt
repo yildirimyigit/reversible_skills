@@ -1,0 +1,1 @@
+{on(red_block_1, table), on(red_block_2, table), clear(red_block_1), clear(red_block_2)}
