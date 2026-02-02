@@ -161,6 +161,17 @@ def read_text_arg(value_or_path: str) -> str:
     return value_or_path.strip()
 
 
+def load_core_conditions(task_name: str, config_dir: str = "/workspace/config"):
+    base = os.path.join(config_dir, task_name)
+    pre_path = os.path.join(base, "pre.txt")
+    post_path = os.path.join(base, "post.txt")
+    with open(pre_path, "r", encoding="utf-8") as f:
+        pre = f.read().strip()
+    with open(post_path, "r", encoding="utf-8") as f:
+        post = f.read().strip()
+    return pre, post
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out_dir", type=str, default="/workspace/data/rlbench_demos")
@@ -230,9 +241,6 @@ def main():
 
         demos = task.get_demos(amount=args.n, live_demos=True)
 
-        pre_core = read_text_arg(args.pre_core) if args.pre_core else ""
-        post_core = read_text_arg(args.post_core) if args.post_core else ""
-
         for i, demo in enumerate(demos):
             frames = []
             for obs in demo:
@@ -273,7 +281,7 @@ def main():
             traj["physics_steps_per_action"] = np.array([steps_per_action], dtype=np.float64)
             traj["control_dt"] = np.array([control_dt], dtype=np.float64)
 
-            # Store core predicate strings if provided (empty string otherwise)
+            pre_core, post_core = load_core_conditions("StackBlocks", config_dir="/workspace/config")
             traj["preconditions_core"] = np.array([pre_core], dtype="<U4096")
             traj["postconditions_core"] = np.array([post_core], dtype="<U4096")
 
