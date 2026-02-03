@@ -281,7 +281,7 @@ def main():
             traj["physics_steps_per_action"] = np.array([steps_per_action], dtype=np.float64)
             traj["control_dt"] = np.array([control_dt], dtype=np.float64)
 
-            pre_core, post_core = load_core_conditions("StackBlocks", config_dir="/workspace/config")
+            pre_core, post_core = load_core_conditions(args.task, config_dir="/workspace/config")
             traj["preconditions_core"] = np.array([pre_core], dtype="<U4096")
             traj["postconditions_core"] = np.array([post_core], dtype="<U4096")
 
