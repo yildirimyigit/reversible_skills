@@ -1,6 +1,6 @@
 import time
 from rlbench.environment import Environment
-from rlbench.tasks import TakeUsbOutOfComputer
+from rlbench.tasks import PutRubbishInBin
 from rlbench.observation_config import ObservationConfig
 from rlbench.action_modes.action_mode import MoveArmThenGripper
 from rlbench.action_modes.arm_action_modes import JointVelocity
@@ -17,7 +17,9 @@ env = Environment(
 )
 env.launch()
 
-task = env.get_task(TakeUsbOutOfComputer)
+input("Environment launched. Press Enter to start demo...")
+
+task = env.get_task(PutRubbishInBin)
 task.set_variation(0)
 
 print("Generating + running 1 live expert demo...")
