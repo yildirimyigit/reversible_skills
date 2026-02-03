@@ -1,0 +1,1 @@
+{plugged_in(usb, computer), on(computer, table), empty(gripper)}

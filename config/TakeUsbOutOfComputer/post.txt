@@ -1,0 +1,1 @@
+{not(plugged_in(usb, computer)), on(usb, table), on(computer, table), empty(gripper)}
