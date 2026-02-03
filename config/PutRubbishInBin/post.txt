@@ -1,0 +1,1 @@
+{in(rubbish, bin), empty(gripper)}
