@@ -1,0 +1,1 @@
+{hung_on(hanger, stand_left), not(hung_on(hanger, stand_right)), clear(stand_right), not(clear(stand_left)), empyt(gripper), stable(hanger)}

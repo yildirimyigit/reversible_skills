@@ -1,0 +1,1 @@
+{open(drawer), empty(gripper), open(gripper)}
