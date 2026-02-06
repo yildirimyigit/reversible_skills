@@ -42,10 +42,19 @@ RUN python3.8 -m pip install --upgrade pip setuptools wheel && \
         "pyrep @ git+https://github.com/stepjam/PyRep.git" && \
     python3.8 -m pip install --no-cache-dir \
         "rlbench @ git+https://github.com/stepjam/RLBench.git" && \
-    # SB3: pin versions that are compatible with Python 3.8 and gymnasium==0.29.1
+    # ---- SB3 stack (avoid stable-baselines3[extra] because it drags opencv-python Qt) ----
     python3.8 -m pip install --no-cache-dir \
         "torch==2.2.2" \
-        "stable-baselines3[extra]==2.4.0"
+        "stable-baselines3==2.4.0" && \
+    # If you need SB3 "extras", install selectively (safe for RLBench GUI)
+    python3.8 -m pip install --no-cache-dir \
+        "tensorboard>=2.10" \
+        "tqdm" \
+        "matplotlib" \
+        "pandas" && \
+    # Ensure OpenCV is headless (no Qt plugins)
+    python3.8 -m pip uninstall -y opencv-python opencv-contrib-python opencv-python-headless || true && \
+    python3.8 -m pip install --no-cache-dir "opencv-python-headless<5"
 
 WORKDIR /workspace
 CMD ["bash"]
