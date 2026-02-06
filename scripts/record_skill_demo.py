@@ -16,33 +16,63 @@ def _as_f32(x):
     return np.asarray(x, dtype=np.float32)
 
 
+def get_top_level_models(pyrep):
+    """
+    First-generation objects under 'world', filtered to models.
+    This typically includes robot, task props, cameras (if modeled), etc.
+    """
+    roots = pyrep.get_objects_in_tree(root_object=None, first_generation_only=True)
+    models = [o for o in roots if o.is_model()]
+    models.sort(key=lambda o: o.get_name())
+    return models
+
+
+def encode_model_trees_to_blob(model_tree_list):
+    """
+    model_tree_list: List[(name: str, tree_bytes: bytes)]
+    Returns:
+      names: (N,) <U
+      blob_u8: (sum_len,) uint8
+      offsets: (N+1,) int64  where tree_i = blob[offsets[i]:offsets[i+1]]
+    """
+    names = [name for name, _ in model_tree_list]
+    trees = [tree for _, tree in model_tree_list]
+
+    lengths = np.array([len(t) for t in trees], dtype=np.int64)
+    offsets = np.concatenate([np.array([0], dtype=np.int64), np.cumsum(lengths, dtype=np.int64)])
+
+    blob = b"".join(trees)
+    blob_u8 = np.frombuffer(blob, dtype=np.uint8)
+
+    names_arr = np.array(names, dtype="<U256")
+    return names_arr, blob_u8, offsets
+
+
 def get_sim_and_control_dt(env):
     """
-    Best-effort extraction of simulator timestep and control step duration.
+    Best-effort extraction of sim timestep and a plausible control_dt.
     Returns (sim_dt, physics_steps_per_action, control_dt). NaN if unavailable.
     """
     sim_dt = np.nan
     steps = np.nan
     control_dt = np.nan
 
-    scene = getattr(env, "_scene", None)
-    if scene is None:
-        return sim_dt, steps, control_dt
-
-    pyrep = getattr(scene, "_pyrep", None)
+    pyrep = getattr(env, "_pyrep", None)
     if pyrep is not None and hasattr(pyrep, "get_simulation_timestep"):
         try:
             sim_dt = float(pyrep.get_simulation_timestep())
         except Exception:
             pass
 
-    for attr in ("_physics_steps_per_control_step", "_steps_per_action", "_physics_steps_per_action"):
-        if hasattr(scene, attr):
-            try:
-                steps = float(getattr(scene, attr))
-                break
-            except Exception:
-                pass
+    scene = getattr(env, "_scene", None)
+    if scene is not None:
+        for attr in ("_physics_steps_per_control_step", "_steps_per_action", "_physics_steps_per_action"):
+            if hasattr(scene, attr):
+                try:
+                    steps = float(getattr(scene, attr))
+                    break
+                except Exception:
+                    pass
 
     if np.isfinite(sim_dt) and np.isfinite(steps):
         control_dt = sim_dt * steps
@@ -67,7 +97,7 @@ def pack_obs(obs, record_front=True, record_wrist=True, record_overhead=False):
     if record_wrist and getattr(obs, "wrist_rgb", None) is not None:
         out["wrist_rgb"] = obs.wrist_rgb.astype(np.uint8)      # (H,W,3)
     if record_overhead and getattr(obs, "overhead_rgb", None) is not None:
-        out["overhead_rgb"] = obs.overhead_rgb.astype(np.uint8)
+        out["overhead_rgb"] = obs.overhead_rgb.astype(np.uint8)  # (H,W,3)
 
     return out
 
@@ -148,19 +178,6 @@ def select_keyframes(gripper_open_T1, T, max_k=12, event_window=3, gripper_thres
     return np.array(idx, dtype=np.int32)
 
 
-def read_text_arg(value_or_path: str) -> str:
-    """
-    If the string is a file path, read it; otherwise treat it as literal content.
-    """
-    if value_or_path is None:
-        return ""
-    p = os.path.expanduser(value_or_path)
-    if os.path.isfile(p):
-        with open(p, "r", encoding="utf-8") as f:
-            return f.read().strip()
-    return value_or_path.strip()
-
-
 def load_core_conditions(task_name: str, config_dir: str = "/workspace/config"):
     base = os.path.join(config_dir, task_name)
     pre_path = os.path.join(base, "pre.txt")
@@ -177,7 +194,7 @@ def main():
     ap.add_argument("--out_dir", type=str, default="/workspace/data/rlbench_demos")
     ap.add_argument("--n", type=int, default=1)
     ap.add_argument("--task", type=str, default="StackBlocks",
-                    help="RLBench task class name, e.g. StackBlocks, TakeLidOffSaucepan, etc.")
+                    help="RLBench task class name, e.g. StackBlocks, TakeUsbOutOfComputer, PutRubbishInBin, etc.")
     ap.add_argument("--variation", type=int, default=0)
 
     # Headless UX: default headless=True, allow --no-headless to show GUI
@@ -191,12 +208,6 @@ def main():
     ap.add_argument("--keyframes", type=int, default=12)
     ap.add_argument("--event_window", type=int, default=3)
     ap.add_argument("--gripper_threshold", type=float, default=0.03)
-
-    # Core predicate strings (optional but recommended)
-    ap.add_argument("--pre_core", type=str, default=None,
-                    help="Core preconditions as text or a file path.")
-    ap.add_argument("--post_core", type=str, default=None,
-                    help="Core postconditions as text or a file path.")
 
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
@@ -239,7 +250,36 @@ def main():
 
         sim_dt, steps_per_action, control_dt = get_sim_and_control_dt(env)
 
-        demos = task.get_demos(amount=args.n, live_demos=True)
+        # ------------------------------------------------------------
+        # Hook scene.get_demo to snapshot CORE POST right after demo runs
+        # ------------------------------------------------------------
+        pyrep = getattr(env, "_pyrep", None)
+        scene = getattr(task, "_scene", None) or getattr(env, "_scene", None)
+        if pyrep is None or scene is None or not hasattr(scene, "get_demo"):
+            raise RuntimeError("Could not access pyrep/scene.get_demo for snapshotting. "
+                               "Check RLBench version/attributes.")
+
+        snapshots = []  # list of per-demo: List[(name, tree_bytes)]
+        orig_get_demo = scene.get_demo
+
+        def get_demo_with_snapshot(*a, **kw):
+            demo = orig_get_demo(*a, **kw)  # executes planner demo
+            pyrep.step()
+
+            models = get_top_level_models(pyrep)
+            trees = [(m.get_name(), m.get_configuration_tree()) for m in models]
+            snapshots.append(trees)
+            return demo
+
+        scene.get_demo = get_demo_with_snapshot
+        try:
+            demos = task.get_demos(amount=args.n, live_demos=True)
+        finally:
+            scene.get_demo = orig_get_demo
+
+        if len(snapshots) != len(demos):
+            print(f"[warn] snapshots={len(snapshots)} demos={len(demos)}. "
+                  f"Will align by min length.")
 
         for i, demo in enumerate(demos):
             frames = []
@@ -253,10 +293,10 @@ def main():
 
             traj = stack_trajectory(frames)
 
-            # Derive action proxies (since RLBench does not expose actions in your build)
+            # Derive action proxies
             derive_actions(traj, gripper_threshold=args.gripper_threshold)
 
-            # Keyframes for later querying (indices only; query script will slice images)
+            # Keyframes for Gemini querying
             T = int(traj["joint_positions"].shape[0])
             k_idx = select_keyframes(
                 traj["gripper_open"], T,
@@ -265,6 +305,19 @@ def main():
                 gripper_threshold=args.gripper_threshold
             )
             traj["keyframe_indices"] = k_idx
+
+            # Attach CORE POST snapshot (model trees)
+            if i < len(snapshots):
+                model_trees = snapshots[i]
+                names_arr, blob_u8, offsets = encode_model_trees_to_blob(model_trees)
+                traj["post_state_model_names"] = names_arr
+                traj["post_state_model_tree_blob"] = blob_u8
+                traj["post_state_model_tree_offsets"] = offsets
+                traj["post_state_snapshot_kind"] = np.array(["top_level_model_trees"], dtype="<U64")
+                traj["post_state_model_count"] = np.array([len(names_arr)], dtype=np.int32)
+            else:
+                traj["post_state_snapshot_kind"] = np.array(["missing"], dtype="<U64")
+                traj["post_state_model_count"] = np.array([0], dtype=np.int32)
 
             # Demo-level metadata
             traj["task"] = np.array([args.task], dtype="<U64")
@@ -291,7 +344,10 @@ def main():
             )
             np.savez_compressed(out_path, **traj)
 
-            print(f"Saved {out_path}  T={T}  keyframes={len(k_idx)}  actions=DERIVED  control_dt={control_dt}")
+            print(
+                f"Saved {out_path}  T={T}  keyframes={len(k_idx)}  actions=DERIVED  "
+                f"control_dt={control_dt}  post_state_models={int(traj['post_state_model_count'][0])}"
+            )
 
     finally:
         env.shutdown()
