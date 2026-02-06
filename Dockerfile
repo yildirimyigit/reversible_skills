@@ -32,12 +32,20 @@ ENV QT_QPA_PLATFORM=xcb
 ENV XDG_RUNTIME_DIR=/tmp/runtime-root
 RUN mkdir -p /tmp/runtime-root && chmod 700 /tmp/runtime-root
 
-# --- Python deps + PyRep + RLBench ---
+# --- Python deps + PyRep + RLBench + SB3 (pinned to avoid conflicts) ---
 RUN python3.8 -m pip install --upgrade pip setuptools wheel && \
-    python3.8 -m pip install "gymnasium==0.29.1" "shimmy>=1.3.0" && \
-    python3.8 -m pip install "cffi==1.14.2" && \
-    python3.8 -m pip install --no-build-isolation "pyrep @ git+https://github.com/stepjam/PyRep.git" && \
-    python3.8 -m pip install "rlbench @ git+https://github.com/stepjam/RLBench.git"
+    python3.8 -m pip install --no-cache-dir \
+        "gymnasium==0.29.1" \
+        "shimmy>=1.3.0" && \
+    python3.8 -m pip install --no-cache-dir "cffi==1.14.2" && \
+    python3.8 -m pip install --no-cache-dir --no-build-isolation \
+        "pyrep @ git+https://github.com/stepjam/PyRep.git" && \
+    python3.8 -m pip install --no-cache-dir \
+        "rlbench @ git+https://github.com/stepjam/RLBench.git" && \
+    # SB3: pin versions that are compatible with Python 3.8 and gymnasium==0.29.1
+    python3.8 -m pip install --no-cache-dir \
+        "torch==2.2.2" \
+        "stable-baselines3[extra]==2.4.0"
 
 WORKDIR /workspace
 CMD ["bash"]
