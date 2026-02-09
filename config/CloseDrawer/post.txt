@@ -1,1 +1,1 @@
-{not(open(drawer)), empty(gripper), not(open(gripper))}
+{not(open(drawer)), empty(gripper)}
