@@ -216,45 +216,77 @@ def derive_actions(traj, gripper_threshold=0.03):
     traj["gripper_threshold"] = np.array([gripper_threshold], dtype=np.float32)
 
 
-def select_keyframes(gripper_open_T1, T, max_k=12, event_window=3, gripper_threshold=0.03):
+def select_keyframes(
+    gripper_open_T1: np.ndarray,
+    T: int,
+    max_k: int = 12,
+    event_window: int = 3,
+    gripper_threshold: float = 0.03,
+) -> np.ndarray:
     """
-    Pick indices:
-      - include start & end
-      - include gripper flips (+/- event_window)
-      - fill with uniform
-      - subsample if too many
+    Returns EXACTLY max_k indices.
+    If T >= max_k: all indices are unique.
+    If T < max_k: pads by repeating (T-1).
     """
+    if max_k <= 0:
+        return np.zeros((0,), dtype=np.int32)
+
+    # If very short trajectory, pad.
+    if T <= max_k:
+        base = list(range(T))
+        while len(base) < max_k:
+            base.append(T - 1)
+        return np.array(base, dtype=np.int32)
+
     go = gripper_open_T1.reshape(T)
-    bin_state = (go > gripper_threshold).astype(np.int32)
-    flips = np.where(bin_state[1:] != bin_state[:-1])[0] + 1
+    state = (go > gripper_threshold).astype(np.int32)
+    flips = np.where(state[1:] != state[:-1])[0] + 1
 
-    idx = {0, T - 1}
-    for f in flips:
+    # Priority list: endpoints first, then around flips
+    candidates = []
+    def add(i):
+        if 0 <= i < T and i not in seen:
+            seen.add(i)
+            candidates.append(i)
+
+    seen = set()
+    add(0)
+    add(T - 1)
+
+    for f in flips.tolist():
         for d in range(-event_window, event_window + 1):
-            j = f + d
-            if 0 <= j < T:
-                idx.add(int(j))
+            add(f + d)
 
-    idx = sorted(idx)
-
-    if len(idx) < max_k:
+    # If still not enough, fill with uniform samples
+    if len(candidates) < max_k:
         uni = np.linspace(0, T - 1, num=max_k, dtype=np.int32).tolist()
         for u in uni:
-            if len(idx) >= max_k:
+            add(int(u))
+            if len(candidates) >= max_k:
                 break
-            if u not in idx:
-                idx.append(int(u))
-        idx = sorted(set(idx))
 
-    if len(idx) > max_k:
-        keep = [idx[0]]
-        middle = idx[1:-1]
-        take = np.linspace(0, len(middle) - 1, num=max_k - 2, dtype=np.int32)
-        keep += [middle[i] for i in take]
-        keep += [idx[-1]]
-        idx = keep
+    # If still not enough (rare), fill sequentially
+    if len(candidates) < max_k:
+        for u in range(T):
+            add(u)
+            if len(candidates) >= max_k:
+                break
 
-    return np.array(idx, dtype=np.int32)
+    # If too many, downsample but keep endpoints
+    if len(candidates) > max_k:
+        # lock endpoints
+        locked = [0, T - 1]
+        middle = [x for x in candidates if x not in locked]
+        n_mid = max_k - 2
+        take = np.linspace(0, len(middle) - 1, num=n_mid, dtype=np.int32)
+        picked = [locked[0]] + [middle[i] for i in take] + [locked[1]]
+        candidates = picked
+
+    # Final sanity: unique and sorted, exactly max_k
+    candidates = sorted(candidates)
+    assert len(candidates) == max_k, f"Expected {max_k} keyframes, got {len(candidates)}"
+    return np.array(candidates, dtype=np.int32)
+
 
 
 def load_core_conditions(task_name: str, config_dir: str):
