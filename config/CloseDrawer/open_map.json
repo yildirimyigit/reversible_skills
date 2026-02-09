@@ -1,4 +1,3 @@
 {
-  "drawer_bottom": { "joint": "drawer_joint_bottom", "threshold": 0.02, "direction": ">" },
-  "drawer":        { "joint": "drawer_joint_bottom", "threshold": 0.02, "direction": ">" }
+  "drawer":        { "joint": "drawer_joint_bottom", "threshold": 0.08, "direction": ">" }
 }
