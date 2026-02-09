@@ -18,6 +18,8 @@ class CurriculumCallback(BaseCallback):
 
     def _on_step(self) -> bool:
         level = min(1.0, float(self.num_timesteps) / float(max(1, self.curriculum_steps)))
+        # level = min(1.0, max(float(self.num_timesteps) / float(max(1, self.curriculum_steps)), 0.09))
+
         self.training_env.env_method("set_curriculum", level)
         return True
 
