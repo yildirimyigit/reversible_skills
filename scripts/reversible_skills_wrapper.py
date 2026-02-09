@@ -335,6 +335,14 @@ class ReverseSkillEnv(gym.Env):
             "reset_forward_t": int(ft),
             "curriculum_level": float(self.curriculum_level),
         }
+
+        # success, sat = self._atoms_satisfied()
+        # opened, q = is_open(self.open_map["drawer"])  # or the correct arg name
+
+        # print("reset_forward_t =", info["reset_forward_t"])
+        # print("[reset] snapshot=", info.get("reset_snapshot"),
+        #     "q=", q, "opened=", opened, "success=", success, "sat=", sat)
+
         return obs_vec, info
 
     def step(self, action: np.ndarray):
