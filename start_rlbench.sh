@@ -16,6 +16,9 @@ DATA_HOST="/home/yigit/projects/inverse/reversible_skills/data"
 DATA_CONT="/workspace/data"
 CONFIG_HOST="/home/yigit/projects/inverse/reversible_skills/config"
 CONFIG_CONT="/workspace/config"
+RUNS_HOST="/home/yigit/projects/inverse/reversible_skills/runs"
+RUNS_CONT="/workspace/runs"
+
 
 # ---------------------------
 # Helpers
@@ -79,6 +82,7 @@ run_container() {
     -v "${SCRIPTS_HOST}:${SCRIPTS_CONT}:rw" \
     -v "${DATA_HOST}:${DATA_CONT}:rw" \
     -v "${CONFIG_HOST}:${CONFIG_CONT}:rw" \
+    -v "${RUNS_HOST}:${RUNS_CONT}:rw" \
     "${IMAGE}"
 }
 
