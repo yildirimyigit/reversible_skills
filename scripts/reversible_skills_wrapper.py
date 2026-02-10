@@ -293,7 +293,7 @@ class ReverseSkillEnv(gym.Env):
     def _reward(self) -> float:
         # small dense reward based on open predicate satisfaction
         ok_all, sat = self._atoms_satisfied()
-        r = 0.0
+        r = -0.01
         for k, v in sat.items():
             r += 1.0 if v else -0.2
         if ok_all and len(sat) > 0:
