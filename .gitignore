@@ -5,3 +5,5 @@
 PyRep/
 RLBench/
 *pycache*/
+*.zip
+*.pkl
