@@ -24,6 +24,7 @@ def main():
     ap.add_argument("--max_steps", type=int, default=None, help="Override env max steps if set.")
     ap.add_argument("--settle_steps", type=int, default=10)
     ap.add_argument("--open_map", type=str, default=None)
+    ap.add_argument("--spatial_map", type=str, default=None)
 
     ap.add_argument("--curriculum", type=float, default=1.0,
                     help="Reset curriculum level in [0,1]. 1=start from post, 0=start from easiest keyframe.")
@@ -31,6 +32,9 @@ def main():
     ap.add_argument("--sleep", type=float, default=0.03,
                     help="Seconds to sleep between steps for nicer visualization.")
     args = ap.parse_args()
+
+    if args.spatial_map is not None and not os.path.isfile(args.spatial_map):
+        raise FileNotFoundError(args.spatial_map)
 
     # Force GUI visualization
     headless = False
@@ -44,6 +48,7 @@ def main():
             max_episode_steps=(args.max_steps if args.max_steps is not None else 150),
             settle_steps_after_restore=args.settle_steps,
             open_map_path=args.open_map,
+            spatial_map_path=args.spatial_map,
         )
         env.set_curriculum(args.curriculum)
         return Monitor(env)
@@ -94,8 +99,8 @@ def main():
         info = infos[0] if isinstance(infos, (list, tuple)) else infos
         success = False
         atoms = info.get("atoms", {})
-        if isinstance(atoms, dict) and len(atoms) > 0:
-            success = all(bool(v) for v in atoms.values())
+
+        success = bool(info.get("atoms")) and all(info["atoms"].values())
 
         successes += int(success)
         print(f"Episode {ep+1}/{args.episodes}: len={ep_len} return={ep_return:.2f} success={success}")
