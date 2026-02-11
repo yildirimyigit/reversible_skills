@@ -1,1 +1,1 @@
-{on(rubbish, table), not(in(rubbish, bin)), empty(gripper)}
+{on(rubbish, table), not(in(rubbish, bin)), gripper_open(), empty(gripper)}

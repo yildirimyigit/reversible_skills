@@ -1,0 +1,18 @@
+{
+  "rubbish": { "object": "rubbish" },
+
+  "table": {
+    "object": "diningTable_visible",
+    "on": { "z_tol": 0.02, "xy_margin": 0.02, "mode": "aabb_top" }
+  },
+
+  "bin": {
+    "object": "bin_visual",
+    "in": {
+      "mode": "center_in_aabb",
+      "shrink_xy": 0.02,
+      "shrink_z_top": 0.01,
+      "shrink_z_bottom": 0.00
+    }
+  }
+}
