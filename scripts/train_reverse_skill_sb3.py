@@ -92,7 +92,11 @@ def main():
     ap.add_argument("--seed_from_demo", action="store_true")
 
     ap.add_argument("--open_map", type=str, default=None)
+    ap.add_argument("--spatial_map", type=str, default=None)
     args = ap.parse_args()
+
+    if args.spatial_map is not None and not os.path.isfile(args.spatial_map):
+        raise FileNotFoundError(args.spatial_map)
 
     os.makedirs(args.logdir, exist_ok=True)
 
@@ -105,6 +109,7 @@ def main():
             max_episode_steps=args.max_episode_steps,
             settle_steps_after_restore=args.settle_steps,
             open_map_path=args.open_map,
+            spatial_map_path=args.spatial_map,
         )
         return Monitor(env)
 
