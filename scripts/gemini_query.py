@@ -105,22 +105,23 @@ def event_keyframes_from_state(state01: np.ndarray, T: int, max_k: int, event_wi
 
 
 def choose_keyframes(npz, T: int, max_k: int, event_window: int) -> np.ndarray:
-    if "keyframe_indices" in npz:
-        k_idx = npz["keyframe_indices"].astype(np.int32)
-    else:
-        if "action_gripper" in npz:
-            g = npz["action_gripper"].reshape(T)
-            state = (g > 0.5).astype(np.int32)
-            k_idx = event_keyframes_from_state(state, T, max_k=max(max_k, 2), event_window=event_window)
-        elif "gripper_open" in npz:
-            thr = float(npz["gripper_threshold"][0]) if "gripper_threshold" in npz else 0.03
-            go = npz["gripper_open"].reshape(T)
-            state = (go > thr).astype(np.int32)
-            k_idx = event_keyframes_from_state(state, T, max_k=max(max_k, 2), event_window=event_window)
-        else:
-            k_idx = np.linspace(0, T - 1, num=min(max_k, T), dtype=np.int32)
+    max_k = max(max_k, 2)
 
-    return force_include_endpoints(k_idx, T, max_k=max(max_k, 2))
+    if "action_gripper" in npz:
+        g = npz["action_gripper"].reshape(T)
+        state = (g > 0.5).astype(np.int32)
+        k_idx = event_keyframes_from_state(state, T, max_k=max_k, event_window=event_window)
+
+    elif "gripper_open" in npz:
+        thr = float(npz["gripper_threshold"][0]) if "gripper_threshold" in npz else 0.03
+        go = npz["gripper_open"].reshape(T)
+        state = (go > thr).astype(np.int32)
+        k_idx = event_keyframes_from_state(state, T, max_k=max_k, event_window=event_window)
+
+    else:
+        k_idx = np.linspace(0, T - 1, num=min(max_k, T), dtype=np.int32)
+
+    return force_include_endpoints(k_idx, T, max_k=max_k)
 
 
 # ----------------------------
@@ -241,6 +242,7 @@ IMPORTANT gripper semantics (do not invert):
 - g_rev[k] = OPEN means not holding / releasing.
 - g_rev[k] = CLOSED means trying to grasp or hold.
 - CLOSED can succeed by contact: the gripper may be commanded CLOSED before reaching the block and then grasp when contact occurs.
+- If you claim the reverse rollout picks something up, you must have evidence that the gripper actually grasps (e.g., touch forces, finger joint positions blocked by an object, or clear visual confirmation). Otherwise treat it as uncertain/unlikely.
 
 Goal:
 Decide whether exact reverse replay plausibly takes the environment from CORE POST → CORE PRE.
