@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import os
 import json
 import re
 from dataclasses import dataclass
@@ -18,43 +17,115 @@ from rlbench.action_modes.gripper_action_modes import Discrete
 
 from pyrep.objects.joint import Joint
 
+from pyrep.objects.shape import Shape
+from pyrep.objects.object import Object
+
+
+def _mat34_to_44(m34) -> np.ndarray:
+    m = np.asarray(m34, dtype=np.float32).reshape(3, 4)
+    M = np.eye(4, dtype=np.float32)
+    M[:3, :4] = m
+    return M
+
+def world_aabb(obj) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Returns (min_xyz, max_xyz) in world frame.
+    Assumes obj.get_bounding_box() returns [minx, maxx, miny, maxy, minz, maxz] in local frame,
+    and obj.get_matrix() returns a 3x4 transform in row-major.
+    """
+    bb = obj.get_bounding_box()
+    minx, maxx, miny, maxy, minz, maxz = [float(x) for x in bb]
+
+    corners = np.array(
+        [[x, y, z, 1.0]
+         for x in (minx, maxx)
+         for y in (miny, maxy)
+         for z in (minz, maxz)],
+        dtype=np.float32
+    )  # (8,4)
+
+    M = _mat34_to_44(obj.get_matrix())
+    wc = (M @ corners.T).T[:, :3]  # (8,3)
+
+    return wc.min(axis=0), wc.max(axis=0)
+
+def aabb_center(min_xyz: np.ndarray, max_xyz: np.ndarray) -> np.ndarray:
+    return 0.5 * (min_xyz + max_xyz)
+
+class SpatialResolver:
+    def __init__(self, spatial_map_path: str):
+        with open(spatial_map_path, "r", encoding="utf-8") as f:
+            self.cfg = json.load(f)
+
+    def get_obj(self, sym: str):
+        spec = self.cfg.get(sym, {})
+        name = spec.get("object", sym)
+
+        # robust: try Shape first, then generic Object
+        try:
+            return Shape(name)
+        except Exception:
+            try:
+                return Object.get_object(name)
+            except Exception:
+                raise KeyError(f"Could not resolve symbol '{sym}' to object '{name}'")
+
+    def on_params(self, sym: str) -> dict:
+        return (self.cfg.get(sym, {}).get("on", {}) or {})
+
+    def in_params(self, sym: str) -> dict:
+        return (self.cfg.get(sym, {}).get("in", {}) or {})
+
 
 # ----------------------------
-# Predicate parsing (minimal)
+# Predicate parsing (multi-arg)
 # ----------------------------
 @dataclass
 class Atom:
     neg: bool
     pred: str
-    arg: str  # single-arg for now: open(x)
+    args: List[str]
+
+def _split_top_level(s: str, sep: str = ",") -> List[str]:
+    out = []
+    depth = 0
+    start = 0
+    for i, ch in enumerate(s):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+        elif ch == sep and depth == 0:
+            out.append(s[start:i].strip())
+            start = i + 1
+    tail = s[start:].strip()
+    if tail:
+        out.append(tail)
+    return [x for x in out if x]
 
 def parse_atoms(set_str: str) -> List[Atom]:
-    """
-    Parse strings like:
-      "{open(drawer), empty(gripper)}"
-      "{not(open(drawer))}"
-    We only *evaluate* open(x)/not(open(x)) for now.
-    """
     s = (set_str or "").strip()
     if not s:
         return []
-    s = s.strip()
     if s.startswith("{") and s.endswith("}"):
-        s = s[1:-1]
-    parts = [p.strip() for p in s.split(",") if p.strip()]
+        s = s[1:-1].strip()
+
+    parts = _split_top_level(s, ",")
     out: List[Atom] = []
     for p in parts:
         neg = False
+        p = p.strip()
         if p.startswith("not(") and p.endswith(")"):
             neg = True
             p = p[4:-1].strip()
 
-        m = re.match(r"^([a-zA-Z_][a-zA-Z0-9_]*)\(([^()]+)\)$", p)
+        m = re.match(r"^([a-zA-Z_][a-zA-Z0-9_]*)\((.*)\)$", p)
         if not m:
             continue
         pred = m.group(1).strip()
-        arg = m.group(2).strip()
-        out.append(Atom(neg=neg, pred=pred, arg=arg))
+        args_str = m.group(2).strip()
+        args = [a.strip() for a in _split_top_level(args_str, ",")]
+        out.append(Atom(neg=neg, pred=pred, args=args))
     return out
 
 
@@ -118,6 +189,45 @@ def is_open(open_spec: OpenSpec) -> Tuple[bool, float]:
         return (pos < open_spec.threshold), pos
 
 
+def eval_on(obj, support, z_tol=0.02, xy_margin=0.02) -> bool:
+    omin, omax = world_aabb(obj)
+    smin, smax = world_aabb(support)
+
+    obj_bottom_z = float(omin[2])
+    sup_top_z = float(smax[2])
+    c = aabb_center(omin, omax)
+
+    z_ok = abs(obj_bottom_z - sup_top_z) <= float(z_tol)
+
+    x_ok = (float(smin[0]) - xy_margin) <= float(c[0]) <= (float(smax[0]) + xy_margin)
+    y_ok = (float(smin[1]) - xy_margin) <= float(c[1]) <= (float(smax[1]) + xy_margin)
+    return bool(z_ok and x_ok and y_ok)
+
+def eval_in(obj, container, mode="center_in_aabb",
+            shrink_xy=0.02, shrink_z_top=0.01, shrink_z_bottom=0.0) -> bool:
+    omin, omax = world_aabb(obj)
+    cmin, cmax = world_aabb(container)
+
+    cmin = cmin.copy()
+    cmax = cmax.copy()
+    cmin[0] += shrink_xy
+    cmin[1] += shrink_xy
+    cmin[2] += shrink_z_bottom
+    cmax[0] -= shrink_xy
+    cmax[1] -= shrink_xy
+    cmax[2] -= shrink_z_top
+
+    if mode == "center_in_aabb":
+        p = aabb_center(omin, omax)
+        return bool(np.all(p >= cmin) and np.all(p <= cmax))
+
+    # stricter: require ALL object AABB corners inside container AABB
+    if mode == "aabb_contained":
+        return bool(np.all(omin >= cmin) and np.all(omax <= cmax))
+
+    raise ValueError(f"Unknown in-mode: {mode}")
+
+
 # ----------------------------
 # Env
 # ----------------------------
@@ -142,6 +252,7 @@ class ReverseSkillEnv(gym.Env):
         max_episode_steps: int = 150,
         settle_steps_after_restore: int = 10,
         open_map_path: Optional[str] = None,
+        spatial_map_path: Optional[str] = None,
     ):
         super().__init__()
         self.demo_npz_path = demo_npz_path
@@ -173,7 +284,7 @@ class ReverseSkillEnv(gym.Env):
         self.pre_core = str(self.demo["preconditions_core"][0]) if "preconditions_core" in self.demo else ""
         self.post_core = str(self.demo["postconditions_core"][0]) if "postconditions_core" in self.demo else ""
 
-        self.target_atoms = [a for a in parse_atoms(self.pre_core) if a.pred == "open"]
+        # self.target_atoms = [a for a in parse_atoms(self.pre_core) if a.pred == "open"]
 
         # ---- build RLBench env ----
         obs_config = ObservationConfig()
@@ -182,6 +293,7 @@ class ReverseSkillEnv(gym.Env):
         obs_config.joint_velocities = True
         obs_config.gripper_open = True
         obs_config.gripper_pose = True
+        obs_config.gripper_touch_forces = True
 
         action_mode = MoveArmThenGripper(JointVelocity(), Discrete())
         self._rlbench_env = Environment(action_mode, obs_config=obs_config, headless=self.headless)
@@ -209,6 +321,11 @@ class ReverseSkillEnv(gym.Env):
 
         # action: 7 joint velocities + 1 gripper (sign -> discrete)
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(8,), dtype=np.float32)
+
+        self.spatial = SpatialResolver(spatial_map_path) if spatial_map_path else None
+        self.target_atoms = parse_atoms(self.pre_core)
+
+        self.empty_touch_thr = 0.1
 
     # ----------------------------
     # Curriculum API (called via env_method)
@@ -249,6 +366,11 @@ class ReverseSkillEnv(gym.Env):
         diffs = np.abs(self.keyframe_indices.astype(np.int32) - target_t)
         row = int(np.argmin(diffs))
         return "keyframe", row, int(self.keyframe_indices[row])
+    
+    def _is_gripper_open(self, obs, thr=0.5) -> bool:
+        if hasattr(obs, "gripper_open_amount") and obs.gripper_open_amount is not None:
+            return float(obs.gripper_open_amount) > thr
+        return bool(getattr(obs, "gripper_open", False))
 
     # ----------------------------
     # Obs packing
@@ -256,7 +378,7 @@ class ReverseSkillEnv(gym.Env):
     def _obs_to_vec(self, obs) -> np.ndarray:
         q = np.asarray(obs.joint_positions, dtype=np.float32).reshape(7)
         dq = np.asarray(obs.joint_velocities, dtype=np.float32).reshape(7)
-        go = np.asarray([float(obs.gripper_open)], dtype=np.float32)  # 1
+        go = np.asarray([1.0 if self._is_gripper_open(obs) else 0.0], dtype=np.float32)
         gp = np.asarray(obs.gripper_pose, dtype=np.float32).reshape(7) if obs.gripper_pose is not None else np.zeros((7,), np.float32)
 
         feats = []
@@ -272,29 +394,99 @@ class ReverseSkillEnv(gym.Env):
     # ----------------------------
     # Goal evaluation + reward
     # ----------------------------
-    def _atoms_satisfied(self) -> Tuple[bool, Dict[str, bool]]:
-        """
-        Evaluate target_atoms (open/not(open)) only.
-        """
+    def _atoms_satisfied(self, obs=None) -> Tuple[bool, Dict[str, bool]]:
         sat: Dict[str, bool] = {}
         ok_all = True
+
         for a in self.target_atoms:
-            if a.arg not in self.open_map:
-                # cannot evaluate -> treat as not satisfied
-                sat[f"{'not(' if a.neg else ''}open({a.arg}){')' if a.neg else ''}"] = False
-                ok_all = False
-                continue
-            opened, _ = is_open(self.open_map[a.arg])
-            want = (not opened) if a.neg else opened
-            sat[f"{'not(' if a.neg else ''}open({a.arg}){')' if a.neg else ''}"] = bool(want)
-            ok_all = ok_all and bool(want)
+            key = f"{'not(' if a.neg else ''}{a.pred}({', '.join(a.args)}){')' if a.neg else ''}"
+            val = False
+
+            try:
+                if a.pred == "open":
+                    sym = a.args[0]
+                    if sym in self.open_map:
+                        opened, _ = is_open(self.open_map[sym])
+                        val = (not opened) if a.neg else opened
+                    else:
+                        val = False
+
+                elif a.pred in ("on", "in"):
+                    if self.spatial is None:
+                        val = False
+                    else:
+                        if a.pred == "on":
+                            obj_sym, sup_sym = a.args[0], a.args[1]
+                            obj = self.spatial.get_obj(obj_sym)
+                            sup = self.spatial.get_obj(sup_sym)
+                            p = self.spatial.on_params(sup_sym)
+                            mode = p.get("mode", "aabb_top")
+                            if mode == "aabb_top":
+                                raw = eval_on(obj, sup, z_tol=p.get("z_tol", 0.02), xy_margin=p.get("xy_margin", 0.02))
+                            else:
+                                raise ValueError(f"Unknown on-mode: {mode}")
+                            val = (not raw) if a.neg else raw
+
+                        else:  #a.pred == "in":
+                            obj_sym, cont_sym = a.args[0], a.args[1]
+                            obj = self.spatial.get_obj(obj_sym)
+                            cont = self.spatial.get_obj(cont_sym)
+                            p = self.spatial.in_params(cont_sym)
+                            raw = eval_in(
+                                obj, cont,
+                                mode=p.get("mode", "center_in_aabb"),
+                                shrink_xy=p.get("shrink_xy", 0.02),
+                                shrink_z_top=p.get("shrink_z_top", 0.01),
+                                shrink_z_bottom=p.get("shrink_z_bottom", 0.0),
+                            )
+                            val = (not raw) if a.neg else raw
+
+                elif a.pred == "gripper_open":
+                    # if you use 0-arg predicate. needs obs
+                    if obs is None:
+                        val = False
+                    else:
+                        raw = self._is_gripper_open(obs)
+                        val = (not raw) if a.neg else raw
+
+                elif a.pred == "held":
+                    # simple generic heuristic: close to gripper + gripper closed
+                    if obs is None or self.spatial is None:
+                        val = False
+                    else:
+                        obj_sym = a.args[0]
+                        obj = self.spatial.get_obj(obj_sym)
+                        obj_p = np.array(obj.get_position(), dtype=np.float32)
+                        grip_p = np.array(obs.gripper_pose[:3], dtype=np.float32)
+                        dist = float(np.linalg.norm(obj_p - grip_p))
+                        raw = (dist < 0.05) and (not self._is_gripper_open(obs))
+                        val = (not raw) if a.neg else raw
+
+                elif a.pred == "empty":
+                    if obs is None:
+                        val = False
+                    else:
+                        tf = getattr(obs, "gripper_touch_forces", None)
+                        if tf is None:
+                            raw = self._is_gripper_open(obs)
+                        else:
+                            raw = self._is_gripper_open(obs) and (float(np.linalg.norm(np.asarray(tf))) < self.empty_touch_thr)
+                        val = (not raw) if a.neg else raw
+                else:
+                    val = False
+
+            except Exception:
+                val = False
+
+            sat[key] = bool(val)
+            ok_all = ok_all and bool(val)
+
         return ok_all, sat
 
-    def _reward(self) -> float:
-        # small dense reward based on open predicate satisfaction
-        ok_all, sat = self._atoms_satisfied()
+    
+    def _reward_from_sat(self, ok_all: bool, sat: Dict[str, bool]) -> float:
         r = -0.01
-        for k, v in sat.items():
+        for _, v in sat.items():
             r += 1.0 if v else -0.2
         if ok_all and len(sat) > 0:
             r += 5.0
@@ -329,11 +521,15 @@ class ReverseSkillEnv(gym.Env):
             else:
                 obs = scene.get_observation()
 
+        success, sat = self._atoms_satisfied(obs=obs)
+
         obs_vec = self._obs_to_vec(obs)
         info = {
             "reset_snapshot": reset_tag,
             "reset_forward_t": int(ft),
             "curriculum_level": float(self.curriculum_level),
+            "reset_success": bool(success),
+            "reset_atoms": sat,
         }
 
         # success, sat = self._atoms_satisfied()
@@ -356,9 +552,10 @@ class ReverseSkillEnv(gym.Env):
         obs, _, rlbench_done = self._task.step(rl_action)
 
         obs_vec = self._obs_to_vec(obs)
-        reward = self._reward()
 
-        success, sat = self._atoms_satisfied()
+        success, sat = self._atoms_satisfied(obs=obs)
+        reward = self._reward_from_sat(success, sat)
+
         terminated = bool(success)
         truncated = bool(self._episode_step >= self.max_episode_steps)
 
