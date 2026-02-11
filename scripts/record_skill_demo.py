@@ -220,18 +220,29 @@ def select_keyframes(
     gripper_open_T1: np.ndarray,
     T: int,
     max_k: int = 12,
-    event_window: int = 3,
+    event_window: int = 1,
     gripper_threshold: float = 0.03,
 ) -> np.ndarray:
     """
-    Returns EXACTLY max_k indices.
-    If T >= max_k: all indices are unique.
-    If T < max_k: pads by repeating (T-1).
+    Select EXACTLY max_k keyframes.
+
+    Must-include (priority 1):
+      - t = 0
+      - t = T-1
+      - every t where (gripper_open > threshold) changes (flip indices)
+
+    If must-include count k < max_k:
+      - optionally add context frames within +/- event_window around flips (priority 2),
+        WITHOUT ever removing must-include frames
+      - fill remaining slots using evenly spaced targets over [0, T-1] excluding already selected (priority 3)
+
+    If must-include count k > max_k:
+      - impossible to include all flips; we keep endpoints and uniformly subsample flip indices.
     """
     if max_k <= 0:
         return np.zeros((0,), dtype=np.int32)
 
-    # If very short trajectory, pad.
+    # If very short trajectory, pad by repeating last index.
     if T <= max_k:
         base = list(range(T))
         while len(base) < max_k:
@@ -240,52 +251,125 @@ def select_keyframes(
 
     go = gripper_open_T1.reshape(T)
     state = (go > gripper_threshold).astype(np.int32)
-    flips = np.where(state[1:] != state[:-1])[0] + 1
+    flips = (np.where(state[1:] != state[:-1])[0] + 1).astype(np.int32)
 
-    # Priority list: endpoints first, then around flips
-    candidates = []
-    def add(i):
-        if 0 <= i < T and i not in seen:
-            seen.add(i)
-            candidates.append(i)
+    must = set([0, T - 1])
+    must.update(int(f) for f in flips.tolist())
+    must_list = sorted(must)
 
-    seen = set()
-    add(0)
-    add(T - 1)
+    # Case A: too many must-include frames (cannot satisfy requirement fully)
+    if len(must_list) > max_k:
+        if max_k == 1:
+            return np.array([0], dtype=np.int32)
 
-    for f in flips.tolist():
-        for d in range(-event_window, event_window + 1):
-            add(f + d)
-
-    # If still not enough, fill with uniform samples
-    if len(candidates) < max_k:
-        uni = np.linspace(0, T - 1, num=max_k, dtype=np.int32).tolist()
-        for u in uni:
-            add(int(u))
-            if len(candidates) >= max_k:
-                break
-
-    # If still not enough (rare), fill sequentially
-    if len(candidates) < max_k:
-        for u in range(T):
-            add(u)
-            if len(candidates) >= max_k:
-                break
-
-    # If too many, downsample but keep endpoints
-    if len(candidates) > max_k:
-        # lock endpoints
         locked = [0, T - 1]
-        middle = [x for x in candidates if x not in locked]
+        middle = [x for x in must_list if x not in locked]
         n_mid = max_k - 2
-        take = np.linspace(0, len(middle) - 1, num=n_mid, dtype=np.int32)
-        picked = [locked[0]] + [middle[i] for i in take] + [locked[1]]
-        candidates = picked
 
-    # Final sanity: unique and sorted, exactly max_k
-    candidates = sorted(candidates)
-    assert len(candidates) == max_k, f"Expected {max_k} keyframes, got {len(candidates)}"
-    return np.array(candidates, dtype=np.int32)
+        if n_mid <= 0:
+            return np.array(locked[:max_k], dtype=np.int32)
+
+        take = np.linspace(0, len(middle) - 1, num=n_mid, dtype=np.int32)
+        picked = [locked[0]] + [middle[i] for i in take.tolist()] + [locked[1]]
+        picked = sorted(set(picked))
+
+        # If duplicates collapsed (rare), fill sequentially
+        t = 0
+        while len(picked) < max_k and t < T:
+            if t not in picked:
+                picked.append(t)
+            t += 1
+        picked = sorted(picked)[:max_k]
+        return np.array(picked, dtype=np.int32)
+
+    # Case B: we can include all must frames
+    selected = set(must_list)
+
+    # Priority 2: optional context around flips, but only if budget allows
+    if event_window > 0 and len(selected) < max_k and len(flips) > 0:
+        context = set()
+        for f in flips.tolist():
+            for d in range(-event_window, event_window + 1):
+                t = int(f + d)
+                if 0 <= t < T and t not in selected:
+                    context.add(t)
+
+        # Add closer-to-flip context first
+        flip_list = flips.tolist()
+
+        def dist_to_nearest_flip(t: int) -> int:
+            return min(abs(t - ff) for ff in flip_list)
+
+        context_sorted = sorted(context, key=lambda t: (dist_to_nearest_flip(t), t))
+        for t in context_sorted:
+            if len(selected) >= max_k:
+                break
+            selected.add(int(t))
+
+    # Priority 3: fill remaining using evenly spaced targets across the whole horizon
+    if len(selected) < max_k:
+        targets = np.linspace(0, T - 1, num=max_k, dtype=np.float32)
+
+        for tf in targets:
+            if len(selected) >= max_k:
+                break
+
+            t0 = int(np.round(tf))
+
+            if t0 not in selected:
+                selected.add(t0)
+                continue
+
+            # Find nearest free index around t0
+            r = 1
+            while (t0 - r) >= 0 or (t0 + r) < T:
+                a = t0 - r
+                b = t0 + r
+                if a >= 0 and a not in selected:
+                    selected.add(a)
+                    break
+                if b < T and b not in selected:
+                    selected.add(b)
+                    break
+                r += 1
+
+        # Final fallback: sequential fill (guarantees termination)
+        if len(selected) < max_k:
+            for t in range(T):
+                if len(selected) >= max_k:
+                    break
+                if t not in selected:
+                    selected.add(t)
+
+    out = np.array(sorted(selected), dtype=np.int32)
+
+    # Ensure exact length (rare edge case: trim deterministically if something went wrong)
+    if out.shape[0] > max_k:
+        locked = [0, T - 1]
+        middle = [x for x in out.tolist() if x not in locked]
+        n_mid = max_k - 2
+
+        if n_mid <= 0:
+            out = np.array(locked[:max_k], dtype=np.int32)
+        else:
+            take = np.linspace(0, len(middle) - 1, num=n_mid, dtype=np.int32)
+            out = np.array([locked[0]] + [middle[i] for i in take.tolist()] + [locked[1]], dtype=np.int32)
+            out = np.unique(out)
+
+    # If uniqueness collapsed, fill to length
+    out_list = out.tolist()
+    t = 0
+    while len(out_list) < max_k:
+        if t not in out_list:
+            out_list.append(t)
+        t += 1
+    out = np.array(sorted(out_list)[:max_k], dtype=np.int32)
+
+    print(f"Flips: {flips.tolist()}, must-include frames: {must_list}")
+    print(f"Selected keyframes (total {len(out)}/{T}): {out.tolist()}")
+
+    assert out.shape[0] == max_k, f"Expected {max_k} keyframes, got {out.shape[0]}"
+    return out
 
 
 
@@ -319,7 +403,7 @@ def main():
     ap.add_argument("--overhead", action="store_true")
 
     ap.add_argument("--keyframes", type=int, default=12)
-    ap.add_argument("--event_window", type=int, default=3)
+    ap.add_argument("--event_window", type=int, default=1)
     ap.add_argument("--gripper_threshold", type=float, default=0.03)
 
     ap.add_argument("--config_dir", type=str, default="/workspace/config")
@@ -447,18 +531,27 @@ def main():
 
             # Snapshots: downselect to keyframes + post
             if args.save_snapshots:
-                if len(all_step_rows) == 0:
+                snap_T = len(all_step_rows)
+                if snap_T == 0:
                     raise RuntimeError("Snapshots requested but none captured.")
-                # Align length (demo length and snapshot length can rarely differ by 1)
-                mlen = min(len(all_step_rows), T)
-                if mlen != T:
-                    # truncate trajectory arrays too
-                    for key in list(traj.keys()):
-                        if isinstance(traj[key], np.ndarray) and traj[key].shape[0] >= mlen:
-                            traj[key] = traj[key][:mlen]
-                    T = mlen
-                    k_idx = np.array([t for t in k_idx.tolist() if t < T], dtype=np.int32)
-                    traj["keyframe_indices"] = k_idx
+
+                # Capture a snapshot of the *true* final simulator state after demo ends
+                models_now = get_top_level_models(pyrep)
+                if model_names is None:
+                    model_names = [m.get_name() for m in models_now]
+                final_row = [get_configuration_tree_bytes(m) for m in models_now]
+
+                # Ensure the last stored row corresponds to the true final state
+                all_step_rows[-1] = final_row
+
+                # Now match lengths (pad or truncate)
+                snap_T = len(all_step_rows)
+                if snap_T < T:
+                    all_step_rows.extend([final_row.copy() for _ in range(T - snap_T)])
+                elif snap_T > T:
+                    all_step_rows = all_step_rows[:T]
+
+                traj["keyframe_indices"] = k_idx
 
                 if model_names is None:
                     model_names = []
