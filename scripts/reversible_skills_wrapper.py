@@ -324,6 +324,8 @@ class ReverseSkillEnv(gym.Env):
 
         self.spatial = SpatialResolver(spatial_map_path) if spatial_map_path else None
         self.target_atoms = parse_atoms(self.pre_core)
+        self.shaping_atoms = [a for a in self.target_atoms if a.pred not in ("gripper_open", "empty", "held")]
+        self._prev_shape_potential = 0.0
 
         self.empty_touch_thr = 0.1
 
@@ -365,6 +367,8 @@ class ReverseSkillEnv(gym.Env):
         target_t = int(round(self.curriculum_level * float(max(1, int(self.keyframe_indices[-1])))))
         diffs = np.abs(self.keyframe_indices.astype(np.int32) - target_t)
         row = int(np.argmin(diffs))
+        if self.K > 1:
+            row = max(1, row)
         return "keyframe", row, int(self.keyframe_indices[row])
     
     def _is_gripper_open(self, obs, thr=0.5) -> bool:
@@ -394,11 +398,12 @@ class ReverseSkillEnv(gym.Env):
     # ----------------------------
     # Goal evaluation + reward
     # ----------------------------
-    def _atoms_satisfied(self, obs=None) -> Tuple[bool, Dict[str, bool]]:
+    def _atoms_satisfied(self, obs=None, atoms=None) -> Tuple[bool, Dict[str, bool]]:
+        atoms = self.target_atoms if atoms is None else atoms
         sat: Dict[str, bool] = {}
         ok_all = True
 
-        for a in self.target_atoms:
+        for a in atoms:
             key = f"{'not(' if a.neg else ''}{a.pred}({', '.join(a.args)}){')' if a.neg else ''}"
             val = False
 
@@ -468,9 +473,9 @@ class ReverseSkillEnv(gym.Env):
                     else:
                         tf = getattr(obs, "gripper_touch_forces", None)
                         if tf is None:
-                            raw = self._is_gripper_open(obs)
+                            raw = True  # conservative fallback; or use a distance-to-object heuristic
                         else:
-                            raw = self._is_gripper_open(obs) and (float(np.linalg.norm(np.asarray(tf))) < self.empty_touch_thr)
+                            raw = float(np.linalg.norm(np.asarray(tf))) < self.empty_touch_thr
                         val = (not raw) if a.neg else raw
                 else:
                     val = False
@@ -508,38 +513,39 @@ class ReverseSkillEnv(gym.Env):
             self._restore_snapshot_bytes(trees)
             reset_tag = f"keyframe[{row}]"
 
-        # Get an observation from the task without changing state
-        # safest: a zero-action step is not ideal; instead use scene getter if present.
+        # Get an observation without changing state
         if hasattr(self._task, "get_observation"):
             obs = self._task.get_observation()
         else:
             scene = getattr(self._task, "_scene", None)
             if scene is None or not hasattr(scene, "get_observation"):
-                # last resort: do a single no-op step
                 noop = np.zeros((8,), dtype=np.float32)
                 obs, _, _ = self._task.step(noop)
             else:
                 obs = scene.get_observation()
 
-        success, sat = self._atoms_satisfied(obs=obs)
+        # FULL termination check (all preconditions)
+        success_all, sat_all = self._atoms_satisfied(obs=obs, atoms=self.target_atoms)
+
+        # SHAPING potential init (exclude gripper-related atoms)
+        success_shape, sat_shape = self._atoms_satisfied(obs=obs, atoms=self.shaping_atoms)
+        self._prev_shape_potential = float(sum(sat_shape.values())) / float(max(1, len(sat_shape)))
 
         obs_vec = self._obs_to_vec(obs)
         info = {
             "reset_snapshot": reset_tag,
             "reset_forward_t": int(ft),
             "curriculum_level": float(self.curriculum_level),
-            "reset_success": bool(success),
-            "reset_atoms": sat,
+
+            # Debug / bookkeeping:
+            "reset_success_all": bool(success_all),
+            "reset_atoms_all": sat_all,
+            "reset_success_shape": bool(success_shape),
+            "reset_atoms_shape": sat_shape,
+            "shape_potential": float(self._prev_shape_potential),
         }
-
-        # success, sat = self._atoms_satisfied()
-        # opened, q = is_open(self.open_map["drawer"])  # or the correct arg name
-
-        # print("reset_forward_t =", info["reset_forward_t"])
-        # print("[reset] snapshot=", info.get("reset_snapshot"),
-        #     "q=", q, "opened=", opened, "success=", success, "sat=", sat)
-
         return obs_vec, info
+
 
     def step(self, action: np.ndarray):
         self._episode_step += 1
@@ -550,20 +556,39 @@ class ReverseSkillEnv(gym.Env):
         rl_action = np.concatenate([u, np.asarray([g], dtype=np.float32)], axis=0)
 
         obs, _, rlbench_done = self._task.step(rl_action)
-
         obs_vec = self._obs_to_vec(obs)
 
-        success, sat = self._atoms_satisfied(obs=obs)
-        reward = self._reward_from_sat(success, sat)
+        # FULL termination check (all preconditions)
+        success_all, sat_all = self._atoms_satisfied(obs=obs, atoms=self.target_atoms)
 
-        terminated = bool(success)
+        # SHAPING progress (exclude gripper-related atoms)
+        success_shape, sat_shape = self._atoms_satisfied(obs=obs, atoms=self.shaping_atoms)
+        shape_potential = float(sum(sat_shape.values())) / float(max(1, len(sat_shape)))
+
+        # Potential-difference shaping: reward only for *progress*
+        reward = (shape_potential - float(self._prev_shape_potential)) - 0.01
+        self._prev_shape_potential = shape_potential
+
+        # Optional: small bonus when the shaping subset is fully satisfied
+        if success_shape and len(sat_shape) > 0:
+            reward += 1.0
+
+        terminated = bool(success_all)
+        if terminated:
+            reward += 5.0
+
         truncated = bool(self._episode_step >= self.max_episode_steps)
 
         info = {
             "rlbench_done": bool(rlbench_done),
-            "atoms": sat,
+
+            # Debug:
+            "atoms_all": sat_all,
+            "atoms_shape": sat_shape,
+            "shape_potential": float(shape_potential),
         }
         return obs_vec, float(reward), terminated, truncated, info
+
 
     def close(self):
         try:
