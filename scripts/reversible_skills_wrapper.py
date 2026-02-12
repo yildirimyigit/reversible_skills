@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
+from matplotlib.pylab import seed
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
@@ -250,6 +251,60 @@ def eval_in(obj, container, mode="center_in_aabb",
     raise ValueError(f"Unknown in-mode: {mode}")
 
 
+def in_score(obj, container, mode="center_in_aabb",
+             shrink_xy=0.02, shrink_z_top=0.01, shrink_z_bottom=0.0, beta=50.0) -> float:
+    omin, omax = world_aabb(obj)
+    cmin, cmax = world_aabb(container)
+
+    cmin = cmin.copy()
+    cmax = cmax.copy()
+    cmin[0] += shrink_xy
+    cmin[1] += shrink_xy
+    cmin[2] += shrink_z_bottom
+    cmax[0] -= shrink_xy
+    cmax[1] -= shrink_xy
+    cmax[2] -= shrink_z_top
+
+    p = aabb_center(omin, omax)
+
+    # signed margins to each face; positive means inside
+    margins = np.minimum(p - cmin, cmax - p)  # (3,)
+    min_margin = float(np.min(margins))
+
+    # sigmoid(min_margin): ~1 when well inside, ~0 when outside
+    return float(1.0 / (1.0 + np.exp(-beta * min_margin)))
+
+
+def on_score(obj, support, z_tol=0.02, xy_margin=0.02, kz=80.0, kxy=40.0) -> float:
+    omin, omax = world_aabb(obj)
+    smin, smax = world_aabb(support)
+
+    obj_bottom_z = float(omin[2])
+    sup_top_z = float(smax[2])
+    c = aabb_center(omin, omax)
+
+    z_err = abs(obj_bottom_z - sup_top_z)
+
+    # distance outside the expanded top AABB in xy (0 if inside)
+    xmin = float(smin[0]) - float(xy_margin)
+    xmax = float(smax[0]) + float(xy_margin)
+    ymin = float(smin[1]) - float(xy_margin)
+    ymax = float(smax[1]) + float(xy_margin)
+
+    dx = 0.0
+    if c[0] < xmin: dx = xmin - float(c[0])
+    if c[0] > xmax: dx = float(c[0]) - xmax
+    dy = 0.0
+    if c[1] < ymin: dy = ymin - float(c[1])
+    if c[1] > ymax: dy = float(c[1]) - ymax
+
+    # smooth score in (0,1]
+    sz = np.exp(-kz * max(0.0, z_err - float(z_tol)))
+    sxy = np.exp(-kxy * (dx + dy))
+    return float(sz * sxy)
+
+
+
 # ----------------------------
 # Env
 # ----------------------------
@@ -361,6 +416,12 @@ class ReverseSkillEnv(gym.Env):
         self._prev_reach_potential = 0.0
         self._reach_alpha = 10.0  # exp(-alpha * dist); tune 5..20
         self._reach_weight = 0.2  # keep small; tune 0.05..0.5
+        self.step_cost = 0.002      # smaller than 0.01
+        self.w_goal_dense = 1.0     # absolute dense task score
+        self.w_goal_delta = 0.2     # optional progress term
+        self.w_reach_dense = 0.3    # absolute reach term (prevents drifting away)
+        self.w_reach_delta = 0.1    # optional progress term
+
 
 
     # ----------------------------
@@ -393,16 +454,10 @@ class ReverseSkillEnv(gym.Env):
         Returns (label, keyframe_row or None, forward_t)
         label in {"post", "keyframe"}
         """
-        # target forward_t = curriculum_level * (T-1), but we only have keyframes.
-        # Use post snapshot for near-1, otherwise nearest keyframe.
-        if self.curriculum_level >= 0.999:
+        row = int(round(self.curriculum_level * float(self.K - 1)))
+        row = int(np.clip(row, 0, self.K - 1))
+        if row >= self.K - 1:
             return "post", None, int(self.keyframe_indices[-1])
-
-        target_t = int(round(self.curriculum_level * float(max(1, int(self.keyframe_indices[-1])))))
-        diffs = np.abs(self.keyframe_indices.astype(np.int32) - target_t)
-        row = int(np.argmin(diffs))
-        if self.K > 1:
-            row = max(1, row)
         return "keyframe", row, int(self.keyframe_indices[row])
     
     def _is_gripper_open(self, obs, thr=0.5) -> bool:
@@ -432,6 +487,58 @@ class ReverseSkillEnv(gym.Env):
     # ----------------------------
     # Goal evaluation + reward
     # ----------------------------
+    def _atom_score(self, a: Atom, obs) -> float:
+        try:
+            if a.pred == "in":
+                obj = self.spatial.get_obj(a.args[0])
+                cont = self.spatial.get_obj(a.args[1])
+                p = self.spatial.in_params(a.args[1])
+                s = in_score(
+                    obj, cont,
+                    mode=p.get("mode", "center_in_aabb"),
+                    shrink_xy=p.get("shrink_xy", 0.02),
+                    shrink_z_top=p.get("shrink_z_top", 0.01),
+                    shrink_z_bottom=p.get("shrink_z_bottom", 0.0),
+                )
+                return 1.0 - s if a.neg else s
+
+            if a.pred == "on":
+                obj = self.spatial.get_obj(a.args[0])
+                sup = self.spatial.get_obj(a.args[1])
+                p = self.spatial.on_params(a.args[1])
+                s = on_score(
+                    obj, sup,
+                    z_tol=p.get("z_tol", 0.02),
+                    xy_margin=p.get("xy_margin", 0.02),
+                )
+                return 1.0 - s if a.neg else s
+
+            if a.pred == "held":
+                # continuous "grasp-ish" score (generic)
+                obj = self.spatial.get_obj(a.args[0])
+                obj_p = np.asarray(obj.get_position(), dtype=np.float32)
+                grip_p = np.asarray(obs.gripper_pose[:3], dtype=np.float32)
+                d = float(np.linalg.norm(obj_p - grip_p))
+                close = 1.0 - (1.0 if self._is_gripper_open(obs) else 0.0)
+                tf = getattr(obs, "gripper_touch_forces", None)
+                touch = 0.0 if tf is None else float(np.tanh(np.linalg.norm(np.asarray(tf)) / 0.2))
+                s = float(np.exp(-20.0 * d) * (0.5 * close + 0.5 * touch))
+                return 1.0 - s if a.neg else s
+
+            if a.pred == "gripper_open":
+                s = 1.0 if self._is_gripper_open(obs) else 0.0
+                return 1.0 - s if a.neg else s
+
+            if a.pred == "empty":
+                tf = getattr(obs, "gripper_touch_forces", None)
+                s = 1.0 if (tf is not None and float(np.linalg.norm(np.asarray(tf))) < self.empty_touch_thr) else 0.0
+                return 1.0 - s if a.neg else s
+
+        except Exception:
+            return 0.0
+
+        return 0.0
+
     def _atoms_satisfied(self, obs=None, atoms=None) -> Tuple[bool, Dict[str, bool]]:
         atoms = self.target_atoms if atoms is None else atoms
         sat: Dict[str, bool] = {}
@@ -560,16 +667,17 @@ class ReverseSkillEnv(gym.Env):
         super().reset(seed=seed)
         self._episode_step = 0
 
+        # 1) Restore snapshot first
         label, row, ft = self._choose_reset_source()
         if label == "post":
             self._restore_snapshot_bytes(self.snapshot_post_trees)
             reset_tag = "post"
         else:
-            trees = self.snapshot_keyframe_trees[row]  # shape (M,)
+            trees = self.snapshot_keyframe_trees[row]  # (M,)
             self._restore_snapshot_bytes(trees)
             reset_tag = f"keyframe[{row}]"
 
-        # Get an observation without changing state
+        # 2) Get an observation from the restored state
         if hasattr(self._task, "get_observation"):
             obs = self._task.get_observation()
         else:
@@ -580,12 +688,15 @@ class ReverseSkillEnv(gym.Env):
             else:
                 obs = scene.get_observation()
 
+        # 3) Initialize dense potentials AFTER obs exists
+        self._prev_goal_score = (
+            float(np.mean([self._atom_score(a, obs) for a in self.shaping_atoms]))
+            if self.shaping_atoms else 0.0
+        )
         self._prev_reach_potential = self._reach_potential(obs)
 
-        # FULL termination check (all preconditions)
+        # 4) Bookkeeping / debug
         success_all, sat_all = self._atoms_satisfied(obs=obs, atoms=self.target_atoms)
-
-        # SHAPING potential init (exclude gripper-related atoms)
         success_shape, sat_shape = self._atoms_satisfied(obs=obs, atoms=self.shaping_atoms)
         self._prev_shape_potential = float(sum(sat_shape.values())) / float(max(1, len(sat_shape)))
 
@@ -595,17 +706,20 @@ class ReverseSkillEnv(gym.Env):
             "reset_forward_t": int(ft),
             "curriculum_level": float(self.curriculum_level),
 
-            # Debug / bookkeeping:
             "reset_success_all": bool(success_all),
             "reset_atoms_all": sat_all,
             "reset_success_shape": bool(success_shape),
             "reset_atoms_shape": sat_shape,
+
+            "goal_score": float(self._prev_goal_score),
+            "reach_potential": float(self._prev_reach_potential),
             "shape_potential": float(self._prev_shape_potential),
         }
 
-        print("[dbg reset]", reset_tag, "ft=", ft, "shape_pot=", self._prev_shape_potential)
-        # print("[reset shape]", sat_shape)
-        # print("[reset all]", sat_all)
+        # Optional debug print
+        # print("[dbg reset]", reset_tag, "ft=", ft,
+        #       "goal=", self._prev_goal_score, "reach=", self._prev_reach_potential,
+        #       "shape=", self._prev_shape_potential, "success_all=", success_all)
 
         return obs_vec, info
 
@@ -619,27 +733,28 @@ class ReverseSkillEnv(gym.Env):
         rl_action = np.concatenate([u, np.asarray([g], dtype=np.float32)], axis=0)
 
         obs, _, rlbench_done = self._task.step(rl_action)
-
         obs_vec = self._obs_to_vec(obs)
 
-        # FULL termination check (all preconditions)
+        # Termination check (full preconditions)
         success_all, sat_all = self._atoms_satisfied(obs=obs, atoms=self.target_atoms)
 
-        # SHAPING progress (exclude gripper-related atoms)
-        success_shape, sat_shape = self._atoms_satisfied(obs=obs, atoms=self.shaping_atoms)
-        shape_potential = float(sum(sat_shape.values())) / float(max(1, len(sat_shape)))
-
-        # Potential-difference shaping: reward only for *progress*
-        reward = (shape_potential - float(self._prev_shape_potential)) - 0.01
-        self._prev_shape_potential = shape_potential
-
+        # Dense scores
+        goal_score = (
+            float(np.mean([self._atom_score(a, obs) for a in self.shaping_atoms]))
+            if self.shaping_atoms else 0.0
+        )
         reach_pot = self._reach_potential(obs)
-        reward += self._reach_weight * (reach_pot - float(self._prev_reach_potential))
-        self._prev_reach_potential = reach_pot
 
-        # Optional: small bonus when the shaping subset is fully satisfied
-        if success_shape and len(sat_shape) > 0:
-            reward += 1.0
+        # Reward (dense + delta + step cost)
+        reward = -float(self.step_cost)
+        reward += float(self.w_goal_dense) * goal_score
+        reward += float(self.w_goal_delta) * (goal_score - float(self._prev_goal_score))
+        reward += float(self.w_reach_dense) * reach_pot
+        reward += float(self.w_reach_delta) * (reach_pot - float(self._prev_reach_potential))
+
+        # Update potentials
+        self._prev_goal_score = goal_score
+        self._prev_reach_potential = reach_pot
 
         terminated = bool(success_all)
         if terminated:
@@ -649,11 +764,10 @@ class ReverseSkillEnv(gym.Env):
 
         info = {
             "rlbench_done": bool(rlbench_done),
-
-            # Debug:
-            "atoms_all": sat_all,
-            "atoms_shape": sat_shape,
-            "shape_potential": float(shape_potential),
+            # Useful to log sometimes:
+            # "goal_score": goal_score,
+            # "reach_potential": reach_pot,
+            # "atoms_all": sat_all,
         }
         return obs_vec, float(reward), terminated, truncated, info
 
