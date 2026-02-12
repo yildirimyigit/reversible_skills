@@ -21,18 +21,41 @@ from pyrep.objects.shape import Shape
 from pyrep.objects.object import Object
 
 
-def _mat34_to_44(m34) -> np.ndarray:
-    m = np.asarray(m34, dtype=np.float32).reshape(3, 4)
-    M = np.eye(4, dtype=np.float32)
-    M[:3, :4] = m
-    return M
+def _mat_to_44(m) -> np.ndarray:
+    """
+    Accepts:
+      - 12 floats (3x4 row-major)  -> converts to 4x4
+      - 16 floats (4x4 row-major)  -> uses directly
+    Also attempts a transpose if the 4th row doesn't look like [0,0,0,1].
+    """
+    a = np.asarray(m, dtype=np.float32).reshape(-1)
+
+    if a.size == 12:
+        M = np.eye(4, dtype=np.float32)
+        M[:3, :4] = a.reshape(3, 4)
+        return M
+
+    if a.size == 16:
+        M = a.reshape(4, 4)
+
+        # Some builds may return column-major. If last row is not [0,0,0,1], try transpose.
+        if not np.allclose(M[3, :], np.array([0, 0, 0, 1], dtype=np.float32), atol=1e-3):
+            Mt = M.T
+            if np.allclose(Mt[3, :], np.array([0, 0, 0, 1], dtype=np.float32), atol=1e-3):
+                M = Mt
+
+        return M.astype(np.float32)
+
+    raise ValueError(f"Unexpected matrix size {a.size}; expected 12 or 16.")
+
 
 def world_aabb(obj) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Returns (min_xyz, max_xyz) in world frame.
-    Assumes obj.get_bounding_box() returns [minx, maxx, miny, maxy, minz, maxz] in local frame,
-    and obj.get_matrix() returns a 3x4 transform in row-major.
-    """
+    # Fallback for non-shape objects (Dummy, etc.)
+    if not hasattr(obj, "get_bounding_box"):
+        p = np.asarray(obj.get_position(), dtype=np.float32)
+        eps = 0.01  # 1 cm cube
+        return p - eps, p + eps
+
     bb = obj.get_bounding_box()
     minx, maxx, miny, maxy, minz, maxz = [float(x) for x in bb]
 
@@ -42,12 +65,11 @@ def world_aabb(obj) -> Tuple[np.ndarray, np.ndarray]:
          for y in (miny, maxy)
          for z in (minz, maxz)],
         dtype=np.float32
-    )  # (8,4)
-
-    M = _mat34_to_44(obj.get_matrix())
-    wc = (M @ corners.T).T[:, :3]  # (8,3)
-
+    )
+    M = _mat_to_44(obj.get_matrix())
+    wc = (M @ corners.T).T[:, :3]
     return wc.min(axis=0), wc.max(axis=0)
+
 
 def aabb_center(min_xyz: np.ndarray, max_xyz: np.ndarray) -> np.ndarray:
     return 0.5 * (min_xyz + max_xyz)
@@ -307,6 +329,11 @@ class ReverseSkillEnv(gym.Env):
         self._task.set_variation(self.variation)
 
         self._pyrep = get_pyrep(self._rlbench_env, self._task)
+        # if not hasattr(self, "_names_once"):
+        #     self._names_once = True
+        #     objs = self._pyrep.get_objects_in_tree(root_object=None, first_generation_only=False)
+        #     names = sorted([o.get_name() for o in objs])
+        #     print("[dbg] candidates:", [n for n in names if ("rubb" in n.lower() or "trash" in n.lower() or "bin" in n.lower())][:80])
 
         # open(x) evaluator
         self.open_map = load_open_map(self._pyrep, open_map_path)
@@ -328,6 +355,13 @@ class ReverseSkillEnv(gym.Env):
         self._prev_shape_potential = 0.0
 
         self.empty_touch_thr = 0.1
+
+        # Objects that appear in spatial predicates (generic)
+        self._reach_objs = sorted({a.args[0] for a in self.shaping_atoms if a.pred in ("on", "in")})
+        self._prev_reach_potential = 0.0
+        self._reach_alpha = 10.0  # exp(-alpha * dist); tune 5..20
+        self._reach_weight = 0.2  # keep small; tune 0.05..0.5
+
 
     # ----------------------------
     # Curriculum API (called via env_method)
@@ -480,7 +514,8 @@ class ReverseSkillEnv(gym.Env):
                 else:
                     val = False
 
-            except Exception:
+            except Exception as e:
+                print("[pred error]", key, "->", repr(e))
                 val = False
 
             sat[key] = bool(val)
@@ -496,6 +531,27 @@ class ReverseSkillEnv(gym.Env):
         if ok_all and len(sat) > 0:
             r += 5.0
         return float(r)
+
+    def _reach_potential(self, obs) -> float:
+        if self.spatial is None or obs is None or obs.gripper_pose is None:
+            return 0.0
+        grip_p = np.asarray(obs.gripper_pose[:3], dtype=np.float32)
+
+        dmin = None
+        for sym in self._reach_objs:
+            try:
+                obj = self.spatial.get_obj(sym)
+                obj_p = np.asarray(obj.get_position(), dtype=np.float32)
+                d = float(np.linalg.norm(obj_p - grip_p))
+                dmin = d if dmin is None else min(dmin, d)
+            except Exception:
+                continue
+
+        if dmin is None:
+            return 0.0
+
+        # in (0, 1], higher is better
+        return float(np.exp(-self._reach_alpha * dmin))
 
     # ----------------------------
     # Gym API
@@ -524,6 +580,8 @@ class ReverseSkillEnv(gym.Env):
             else:
                 obs = scene.get_observation()
 
+        self._prev_reach_potential = self._reach_potential(obs)
+
         # FULL termination check (all preconditions)
         success_all, sat_all = self._atoms_satisfied(obs=obs, atoms=self.target_atoms)
 
@@ -544,6 +602,11 @@ class ReverseSkillEnv(gym.Env):
             "reset_atoms_shape": sat_shape,
             "shape_potential": float(self._prev_shape_potential),
         }
+
+        print("[dbg reset]", reset_tag, "ft=", ft, "shape_pot=", self._prev_shape_potential)
+        # print("[reset shape]", sat_shape)
+        # print("[reset all]", sat_all)
+
         return obs_vec, info
 
 
@@ -556,6 +619,7 @@ class ReverseSkillEnv(gym.Env):
         rl_action = np.concatenate([u, np.asarray([g], dtype=np.float32)], axis=0)
 
         obs, _, rlbench_done = self._task.step(rl_action)
+
         obs_vec = self._obs_to_vec(obs)
 
         # FULL termination check (all preconditions)
@@ -568,6 +632,10 @@ class ReverseSkillEnv(gym.Env):
         # Potential-difference shaping: reward only for *progress*
         reward = (shape_potential - float(self._prev_shape_potential)) - 0.01
         self._prev_shape_potential = shape_potential
+
+        reach_pot = self._reach_potential(obs)
+        reward += self._reach_weight * (reach_pot - float(self._prev_reach_potential))
+        self._prev_reach_potential = reach_pot
 
         # Optional: small bonus when the shaping subset is fully satisfied
         if success_shape and len(sat_shape) > 0:
