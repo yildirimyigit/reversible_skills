@@ -7,12 +7,7 @@
   },
 
   "bin": {
-    "object": "bin_visual",
-    "in": {
-      "mode": "center_in_aabb",
-      "shrink_xy": 0.02,
-      "shrink_z_top": 0.01,
-      "shrink_z_bottom": 0.00
-    }
+    "object": "bin",
+    "in": { "mode": "center_in_aabb", "shrink_xy": 0.0, "shrink_z_top": 0.0, "shrink_z_bottom": 0.0 }
   }
 }
