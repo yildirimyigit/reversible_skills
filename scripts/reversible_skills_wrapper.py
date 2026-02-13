@@ -422,6 +422,21 @@ class ReverseSkillEnv(gym.Env):
         self.w_reach_dense = 0.3    # absolute reach term (prevents drifting away)
         self.w_reach_delta = 0.1    # optional progress term
 
+        self._sym_objs = []
+        if self.spatial is not None:
+            syms = set()
+            for a in self.target_atoms:
+                if a.pred in ("on", "in"):
+                    syms.add(a.args[0]); syms.add(a.args[1])
+                if a.pred == "held":
+                    syms.add(a.args[0])
+            # remove non-physical symbols if any
+            syms.discard("gripper")
+            self._sym_objs = sorted(list(syms))
+
+        # add 3 dims per symbol (relative xyz)
+        obs_dim = obs_dim + 3 * len(self._sym_objs)
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(obs_dim,), dtype=np.float32)
 
 
     # ----------------------------
@@ -482,7 +497,23 @@ class ReverseSkillEnv(gym.Env):
             feats.append(float(pos))
         feats = np.asarray(feats, dtype=np.float32)
 
-        return np.concatenate([q, dq, go, gp, feats], axis=0).astype(np.float32)
+        rel_feats = []
+        if self.spatial is not None and obs.gripper_pose is not None:
+            grip_p = np.asarray(obs.gripper_pose[:3], dtype=np.float32)
+            for sym in self._sym_objs:
+                try:
+                    o = self.spatial.get_obj(sym)
+                    p = np.asarray(o.get_position(), dtype=np.float32)
+                    rel_feats.append(p - grip_p)
+                except Exception:
+                    rel_feats.append(np.zeros((3,), dtype=np.float32))
+
+        if rel_feats:
+            rel_feats = np.concatenate(rel_feats, axis=0).astype(np.float32)
+        else:
+            rel_feats = np.zeros((0,), dtype=np.float32)
+
+        return np.concatenate([q, dq, go, gp, feats, rel_feats], axis=0).astype(np.float32)
 
     # ----------------------------
     # Goal evaluation + reward
