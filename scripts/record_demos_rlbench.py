@@ -470,13 +470,8 @@ def main():
                     except Exception as e:
                         snapshot_failed = True
                         snapshot_error = repr(e)
-                        # maintain alignment with placeholder row
                         if model_names is None:
-                            try:
-                                models = get_top_level_models(pyrep)
-                                model_names = [m.get_name() for m in models]
-                            except Exception:
-                                model_names = []
+                            model_names = []
                         all_step_rows.append([b"" for _ in model_names])
 
                 return out
@@ -487,6 +482,12 @@ def main():
                 scene._demo_record_step = _patched_demo_record_step
 
             try:
+                if args.save_snapshots and not snapshot_failed:
+                    models0 = get_top_level_models(pyrep)
+                    if model_names is None:
+                        model_names = [m.get_name() for m in models0]
+                    row0 = [get_configuration_tree_bytes(m) for m in models0]
+                    all_step_rows.append(row0)
                 demos = task.get_demos(amount=1, live_demos=True)
             finally:
                 if args.save_snapshots and orig_demo_record_step is not None:
@@ -604,6 +605,8 @@ def main():
 
             traj["preconditions_core"] = np.array([pre_core], dtype="<U4096")
             traj["postconditions_core"] = np.array([post_core], dtype="<U4096")
+            traj["snapshot_index_shift"] = np.array([0], dtype=np.int32)
+            traj["snapshot_rows_captured"] = np.array([len(all_step_rows)], dtype=np.int32)
 
             out_path = os.path.join(args.out_dir, f"{args.task}_var{args.variation:02d}_demo{i:04d}.npz")
             np.savez_compressed(out_path, **traj)
