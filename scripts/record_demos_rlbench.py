@@ -456,23 +456,37 @@ def main():
 
             orig_demo_record_step = getattr(scene, "_demo_record_step", None)
 
-            def _patched_demo_record_step(*a, **kw):
+            captured_pre0 = False
+
+            def _capture_row():
                 nonlocal model_names, snapshot_failed, snapshot_error
+                try:
+                    models = get_top_level_models(pyrep)
+                    if model_names is None:
+                        model_names = [m.get_name() for m in models]
+                    row = [get_configuration_tree_bytes(m) for m in models]
+                    all_step_rows.append(row)
+                except Exception as e:
+                    snapshot_failed = True
+                    snapshot_error = repr(e)
+                    if model_names is None:
+                        model_names = []
+                    all_step_rows.append([b"" for _ in model_names])
+
+            def _patched_demo_record_step(*a, **kw):
+                nonlocal captured_pre0
+
+                # 0) capture the initial state ONCE (this becomes snapshot[0] == obs[0])
+                if args.save_snapshots and (not snapshot_failed) and (not captured_pre0):
+                    _capture_row()
+                    captured_pre0 = True
+
+                # 1) let RLBench advance & record
                 out = orig_demo_record_step(*a, **kw)
 
-                if args.save_snapshots and not snapshot_failed:
-                    try:
-                        models = get_top_level_models(pyrep)
-                        if model_names is None:
-                            model_names = [m.get_name() for m in models]
-                        row = [get_configuration_tree_bytes(m) for m in models]
-                        all_step_rows.append(row)
-                    except Exception as e:
-                        snapshot_failed = True
-                        snapshot_error = repr(e)
-                        if model_names is None:
-                            model_names = []
-                        all_step_rows.append([b"" for _ in model_names])
+                # 2) capture post-step (snapshot[t+1] == obs[t+1])
+                if args.save_snapshots and (not snapshot_failed):
+                    _capture_row()
 
                 return out
 
@@ -482,12 +496,6 @@ def main():
                 scene._demo_record_step = _patched_demo_record_step
 
             try:
-                if args.save_snapshots and not snapshot_failed:
-                    models0 = get_top_level_models(pyrep)
-                    if model_names is None:
-                        model_names = [m.get_name() for m in models0]
-                    row0 = [get_configuration_tree_bytes(m) for m in models0]
-                    all_step_rows.append(row0)
                 demos = task.get_demos(amount=1, live_demos=True)
             finally:
                 if args.save_snapshots and orig_demo_record_step is not None:
@@ -499,7 +507,7 @@ def main():
 
             # Dense observation trajectory
             frames = []
-            for obs in demo:
+            for obs in demo[1:]:
                 frames.append(pack_obs(
                     obs,
                     record_front=(not args.no_front),
@@ -539,10 +547,36 @@ def main():
 
                 # Match snapshot list length to T (pad/truncate if needed)
                 snap_T = len(all_step_rows)
-                if snap_T < T:
-                    all_step_rows.extend([final_row.copy() for _ in range(T - snap_T)])
-                elif snap_T > T:
+                snap_T_raw = len(all_step_rows)
+
+                # overwrite last with true final state first (ok)
+                all_step_rows[-1] = final_row
+
+                if snap_T_raw < T:
+                    all_step_rows.extend([final_row.copy() for _ in range(T - snap_T_raw)])
+                    shift = 0
+                elif snap_T_raw > T:
+                    # IMPORTANT: drop prefix (warmup/reset snapshots) and keep the demo tail
+                    shift = snap_T_raw - T
+                    all_step_rows = all_step_rows[shift:]
+                else:
+                    shift = 0
+
+                # after crop/pad, guarantee last is final
+                all_step_rows[-1] = final_row
+
+                if len(all_step_rows) < T:
+                    all_step_rows.extend([final_row.copy() for _ in range(T - len(all_step_rows))])
+                else:
                     all_step_rows = all_step_rows[:T]
+                all_step_rows[-1] = final_row
+
+                traj["snapshot_index_shift"] = np.array([shift], dtype=np.int32)
+                traj["snapshot_rows_captured"] = np.array([snap_T_raw], dtype=np.int32)
+                traj["obs_drop_warmup"] = np.array([1], dtype=np.int32)
+                traj["obs_raw_T"] = np.array([len(demo)], dtype=np.int32)
+
+                print(f"[snap] snap_T_raw={snap_T_raw}  T={T}")
 
                 if model_names is None:
                     model_names = []
@@ -605,8 +639,6 @@ def main():
 
             traj["preconditions_core"] = np.array([pre_core], dtype="<U4096")
             traj["postconditions_core"] = np.array([post_core], dtype="<U4096")
-            traj["snapshot_index_shift"] = np.array([0], dtype=np.int32)
-            traj["snapshot_rows_captured"] = np.array([len(all_step_rows)], dtype=np.int32)
 
             out_path = os.path.join(args.out_dir, f"{args.task}_var{args.variation:02d}_demo{i:04d}.npz")
             np.savez_compressed(out_path, **traj)

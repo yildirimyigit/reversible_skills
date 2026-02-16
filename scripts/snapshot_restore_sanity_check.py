@@ -39,13 +39,12 @@ def _restore_with_models_by_name(pyrep, model_names, row_bytes):
         if len(b) <= 1:
             raise RuntimeError(f"Snapshot for model {name} too small: len={len(b)}")
 
-        m = name2m[name]
-        # Try model-level restore first
         try:
-            m.set_configuration_tree(b)
-        except Exception:
-            # Fallback: some builds prefer applying via pyrep
             pyrep.set_configuration_tree(b)
+        except Exception:
+            # fallback if a specific build dislikes pyrep call
+            m = name2m[name]
+            m.set_configuration_tree(b)
 
 
 def restore_row(pyrep, model_names, row_bytes, settle_steps=10):
