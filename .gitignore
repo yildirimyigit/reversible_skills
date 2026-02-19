@@ -8,3 +8,4 @@ RLBench/
 *.zip
 *.pkl
 runs/reverse_skill/
+results/
