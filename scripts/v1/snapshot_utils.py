@@ -175,22 +175,38 @@ def estimate_snapshot_offset(
     return best
 
 
-# -----------------------------
-# High-level restore
-# -----------------------------
+def _controlled_settle(task, n_arm: int, g_cmd: float, steps: int):
+    """
+    Replace raw pyrep.step() settling with controlled settling:
+    apply zero joint-velocities while holding the current discrete gripper command.
+    """
+    if int(steps) <= 0:
+        return
+    zero_v = np.zeros((int(n_arm),), dtype=np.float32)
+    action = np.concatenate([zero_v, np.array([float(g_cmd)], dtype=np.float32)], axis=0)
+    for _ in range(int(steps)):
+        ret = task.step(action)
+        # If the episode terminates during settling, stop settling.
+        if isinstance(ret, (tuple, list)) and len(ret) >= 3 and bool(ret[2]):
+            break
+
+
 def restore_keyframe(
     env,
     task,
-    data: np.lib.npyio.NpzFile,
+    data,
     kf_index: int,
     settle_steps: int = 0,
     snap_offset: int = 0,
+    variation: int | None = None,
+    hold_gcmd: float = 0.0,
 ) -> int:
     """
-    Restore the snapshot for keyframe index `kf_index`.
-
-    Returns the *effective* recorded timestep associated with this restored state:
-      t_eff = clamp(keyframe_indices[kf_index] + snap_offset, 0, T-1)
+    Restore the snapshot for keyframe index kf_index.
+    - Resets episode
+    - Re-applies variation (optional but recommended)
+    - Restores snapshot poses
+    - Optional controlled settle (does not call raw pyrep.step)
     """
     pyrep = get_pyrep(env, task)
 
@@ -208,11 +224,19 @@ def restore_keyframe(
 
     row = kf_trees[kf_index, :].tolist()
 
-    _ = task.reset()
-    for _ in range(5):
-        pyrep.step()
+    # Reset the episode (important for task internals)
+    task.reset()
+    if variation is not None:
+        task.set_variation(int(variation))
 
-    restore_row(pyrep, model_names, row, settle_steps=settle_steps)
+    # Restore teleport poses for all snapshot models
+    restore_row(pyrep, model_names, row, settle_steps=0)
+
+    # Optional: controlled settle (zero joint velocities while holding g_cmd)
+    if int(settle_steps) > 0:
+        n_arm = int(q_all.shape[1])
+        _controlled_settle(task, n_arm=n_arm, g_cmd=float(hold_gcmd), steps=int(settle_steps))
+
     return t_eff
 
 

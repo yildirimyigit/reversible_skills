@@ -18,8 +18,8 @@ run_one () {
   python3 /workspace/scripts/rollback_triage.py \
     --demo_npz "$npz" --task "$task" --variation 0 \
     --out_json "$outjson" \
-    --n_rollouts 10 --settle_steps 2 --success_thresh 0.02 \
-    --kp 6.0 --vmax 1.0 --min_kf_gap 5 \
+    --n_rollouts 10 --settle_steps 0 --success_thresh 0.1 \
+    --kp 5.0 --vmax 0.6 --min_kf_gap 5 \
     --headless
 }
 
