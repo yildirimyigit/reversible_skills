@@ -27,7 +27,7 @@ def main():
     task = env.get_task(getattr(tasks, args.task))
     task.set_variation(0)
 
-    input("Generating demo. Press Enter to start...")
+    # input("Generating demo. Press Enter to start...")
     _ = task.get_demos(amount=1, live_demos=True)  # runs the demo in the sim
 
     input("Demo finished. Press Enter to close...")

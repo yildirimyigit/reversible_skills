@@ -1,31 +1,4 @@
 #!/usr/bin/env python3
-"""
-record_live_demo_with_actions.py  (UPDATED: root-object snapshots)
-
-Why this update:
-- Your current recorder snapshots ONLY top-level MODELS (o.is_model()).
-- For PlugChargerInPowerSupply, important randomized placement is affected by non-model
-  first-generation roots (e.g., Dummy/workspace/Wall1/etc.).
-- In your PyRep build, root objects do NOT expose set_configuration_tree(), so replay MUST
-  restore using env._pyrep.set_configuration_tree(tree_bytes) in the original captured order.
-- Therefore, we must record configuration trees for ALL first-generation ROOT objects
-  (models + non-models), sorted by name, so restore is complete and deterministic.
-
-Snapshot format (new):
-- snapshot_storage = "bytes_v2_roots"
-- snapshot_root_names: (R,) names of first-generation roots sorted by name
-- snapshot_root_is_model: (R,) int32 flags for debugging
-- snapshot_keyframe_trees: (K, R) object bytes
-- snapshot_post_trees: (R,) object bytes
-- snapshot_keyframe_indices: (K,) (alias of keyframe_indices for clarity)
-
-Everything else (obs packing, action synthesis, keyframe selection) is unchanged.
-
-NOTE:
-- This recorder relies on pyrep.backend.sim to convert the returned CData tree to bytes.
-  If sim_backend is unavailable, snapshots will fail (same as your previous script).
-"""
-
 import os
 import argparse
 import time
@@ -38,7 +11,7 @@ from rlbench.action_modes.action_mode import MoveArmThenGripper
 from rlbench.action_modes.arm_action_modes import JointVelocity
 from rlbench.action_modes.gripper_action_modes import Discrete
 
-# PyRep backend (required for robust CData->bytes conversion in many builds)
+# PyRep backend (optional, only for snapshot bytes conversion)
 try:
     from pyrep.backend import sim as sim_backend
 except Exception:
@@ -93,17 +66,13 @@ def get_sim_and_control_dt(env, task):
 
 
 # -----------------------------
-# Snapshots: ALL first-generation roots (models + non-models)
+# Snapshots
 # -----------------------------
-def get_top_level_roots(pyrep):
-    """
-    Returns first-generation root objects sorted by name.
-    We record configuration trees for ALL of them to make restore deterministic across tasks.
-    """
+def get_top_level_models(pyrep):
     roots = pyrep.get_objects_in_tree(root_object=None, first_generation_only=True)
-    roots = list(roots)
-    roots.sort(key=lambda o: o.get_name())
-    return roots
+    models = [o for o in roots if o.is_model()]
+    models.sort(key=lambda o: o.get_name())
+    return models
 
 
 def _tree_cdata_to_bytes(tree_cdata, max_bytes=50_000_000):
@@ -154,12 +123,8 @@ def _tree_cdata_to_bytes(tree_cdata, max_bytes=50_000_000):
     raise RuntimeError("Could not infer configuration tree buffer size.")
 
 
-def get_configuration_tree_bytes(obj):
-    """
-    Works for both model and non-model roots.
-    Many builds return CData (needs conversion), some return bytes/ndarray.
-    """
-    tree = obj.get_configuration_tree()
+def get_configuration_tree_bytes(model):
+    tree = model.get_configuration_tree()
     if isinstance(tree, (bytes, bytearray)):
         return bytes(tree)
     if isinstance(tree, np.ndarray):
@@ -179,12 +144,14 @@ def pack_obs(obs, record_front=True, record_wrist=True, record_overhead=False, r
     if getattr(obs, "joint_velocities", None) is not None:
         out["joint_velocities"] = _as_f32(obs.joint_velocities)  # (7,)
 
+    # gripper_open in RLBench is usually bool/float
     go = float(obs.gripper_open) if not isinstance(obs.gripper_open, (bool, np.bool_)) else (1.0 if obs.gripper_open else 0.0)
     out["gripper_open"] = _as_f32([go])  # (1,)
 
     if getattr(obs, "gripper_pose", None) is not None:
         out["gripper_pose"] = _as_f32(obs.gripper_pose)  # (7,)
 
+    # record misc joint_poses if present (likely 7 joints x 7D pose each)
     jp = None
     try:
         jp = obs.misc.get("joint_poses", None)
@@ -222,6 +189,14 @@ def stack_trajectory(frames):
 # Action synthesis
 # -----------------------------
 def synthesize_actions(traj, *, gripper_threshold=0.03, invert_gripper=False, assume_control_dt=0.05):
+    """
+    Produces:
+      - action_qpos: (T-1, 7+1) = q_target(next) + gripper_cmd(next)
+      - action_vel_fd: (T-1, 7+1) finite difference using dt_used + gripper_cmd(next)
+      - action_vel_obs: (T-1, 7+1) from obs.joint_velocities (if available) + gripper_cmd(next)
+    Also sets:
+      - action: alias to action_qpos  (dt-free)
+    """
     q = traj["joint_positions"].astype(np.float32)  # (T,7)
     T = int(q.shape[0])
     if T < 2:
@@ -232,11 +207,14 @@ def synthesize_actions(traj, *, gripper_threshold=0.03, invert_gripper=False, as
     if invert_gripper:
         g_open = 1.0 - g_open
 
+    # command applied to reach state t+1:
     g_cmd = g_open[1:]  # (T-1,)
 
+    # q-target actions
     q_tgt = q[1:]  # (T-1,7)
     action_qpos = np.concatenate([q_tgt, g_cmd[:, None]], axis=1).astype(np.float32)
 
+    # dt for vel_fd
     dt_used = float(traj.get("control_dt", np.array([np.nan], dtype=np.float64))[0])
     dt_source = "control_dt"
     if not np.isfinite(dt_used) or dt_used <= 0:
@@ -250,7 +228,7 @@ def synthesize_actions(traj, *, gripper_threshold=0.03, invert_gripper=False, as
     if "joint_velocities" in traj:
         v_obs = traj["joint_velocities"].astype(np.float32)
         if v_obs.shape[0] == T:
-            v_obs = v_obs[:-1]
+            v_obs = v_obs[:-1]  # align to (T-1,7)
         if v_obs.shape[0] == T - 1:
             action_vel_obs = np.concatenate([v_obs, g_cmd[:, None]], axis=1).astype(np.float32)
 
@@ -259,7 +237,8 @@ def synthesize_actions(traj, *, gripper_threshold=0.03, invert_gripper=False, as
     if action_vel_obs is not None:
         traj["action_vel_obs"] = action_vel_obs
 
-    traj["action"] = action_qpos  # dt-free default
+    # Default action alias: dt-free, replayable
+    traj["action"] = action_qpos
 
     traj["gripper_threshold"] = np.array([float(gripper_threshold)], dtype=np.float32)
     traj["invert_gripper"] = np.array([1 if invert_gripper else 0], dtype=np.int32)
@@ -271,6 +250,14 @@ def synthesize_actions(traj, *, gripper_threshold=0.03, invert_gripper=False, as
 # Keyframes (simple, deterministic)
 # -----------------------------
 def select_keyframes_simple(gripper_open_T1: np.ndarray, T: int, max_k: int = 12, gripper_threshold: float = 0.03):
+    """
+    Always include:
+      - t=0
+      - t=T-1
+      - all gripper flip indices
+    Then fill remaining with uniform spacing.
+    If too many flips, subsample flips uniformly.
+    """
     if max_k <= 0:
         return np.zeros((0,), dtype=np.int32)
 
@@ -309,6 +296,7 @@ def select_keyframes_simple(gripper_open_T1: np.ndarray, T: int, max_k: int = 12
     if out.shape[0] > max_k:
         out = out[:max_k]
     while out.shape[0] < max_k:
+        # pad deterministically
         out = np.concatenate([out, np.array([T - 1], dtype=np.int32)], axis=0)
     return out
 
@@ -320,7 +308,7 @@ def main():
     ap = argparse.ArgumentParser()
 
     ap.add_argument("--out_dir", type=str, default="/workspace/data/rlbench_demos")
-    ap.add_argument("--n", type=int, default=10)
+    ap.add_argument("--n", type=int, default=1)
     ap.add_argument("--task", type=str, required=True)
     ap.add_argument("--variation", type=int, default=0)
 
@@ -391,36 +379,32 @@ def main():
                 pyrep = getattr(env, "_pyrep", None)
 
             # Snapshot storage aligned per demo step
-            all_step_rows = []  # list of [R roots] byte strings per step
-            root_names = None
-            root_is_model = None
+            all_step_rows = []
+            model_names = None
             snapshot_failed = False
 
             orig_demo_record_step = getattr(scene, "_demo_record_step", None)
 
             def _patched_demo_record_step(*a, **kw):
-                nonlocal root_names, root_is_model, snapshot_failed
+                nonlocal model_names, snapshot_failed
                 out = orig_demo_record_step(*a, **kw)
 
                 if args.save_snapshots and not snapshot_failed:
                     try:
-                        roots = get_top_level_roots(pyrep)
-                        if root_names is None:
-                            root_names = [r.get_name() for r in roots]
-                            root_is_model = [1 if bool(r.is_model()) else 0 for r in roots]
-                        row = [get_configuration_tree_bytes(r) for r in roots]
+                        models = get_top_level_models(pyrep)
+                        if model_names is None:
+                            model_names = [m.get_name() for m in models]
+                        row = [get_configuration_tree_bytes(m) for m in models]
                         all_step_rows.append(row)
                     except Exception:
                         snapshot_failed = True
-                        if root_names is None:
+                        if model_names is None:
                             try:
-                                roots = get_top_level_roots(pyrep)
-                                root_names = [r.get_name() for r in roots]
-                                root_is_model = [1 if bool(r.is_model()) else 0 for r in roots]
+                                models = get_top_level_models(pyrep)
+                                model_names = [m.get_name() for m in models]
                             except Exception:
-                                root_names = []
-                                root_is_model = []
-                        all_step_rows.append([b"" for _ in root_names])
+                                model_names = []
+                        all_step_rows.append([b"" for _ in model_names])
 
                 return out
 
@@ -439,18 +423,15 @@ def main():
                 raise RuntimeError("No demo returned.")
             demo = demos[0]
 
-            # Pack observations
             frames = []
             for obs in demo:
-                frames.append(
-                    pack_obs(
-                        obs,
-                        record_front=True,
-                        record_wrist=(not args.no_wrist),
-                        record_overhead=bool(args.overhead),
-                        record_lowdim=bool(args.record_lowdim),
-                    )
-                )
+                frames.append(pack_obs(
+                    obs,
+                    record_front=True,
+                    record_wrist=(not args.no_wrist),
+                    record_overhead=bool(args.overhead),
+                    record_lowdim=bool(args.record_lowdim),
+                ))
 
             traj = stack_trajectory(frames)
 
@@ -470,36 +451,18 @@ def main():
             T = int(traj["joint_positions"].shape[0])
 
             # Keyframes
-            k_idx = select_keyframes_simple(
-                traj["gripper_open"],
-                T,
-                max_k=int(args.keyframes),
-                gripper_threshold=float(args.gripper_threshold),
-            )
+            k_idx = select_keyframes_simple(traj["gripper_open"], T, max_k=int(args.keyframes), gripper_threshold=float(args.gripper_threshold))
             traj["keyframe_indices"] = k_idx
-            traj["snapshot_keyframe_indices"] = k_idx.copy()
 
             # Snapshots (downselect to keyframes + post)
             if args.save_snapshots:
                 if len(all_step_rows) == 0:
                     raise RuntimeError("Snapshots requested but none captured.")
 
-                roots_now = get_top_level_roots(pyrep)
-                if root_names is None:
-                    root_names = [r.get_name() for r in roots_now]
-                    root_is_model = [1 if bool(r.is_model()) else 0 for r in roots_now]
-
-                # Ensure the root ordering is stable (names must match)
-                roots_now_names = [r.get_name() for r in roots_now]
-                if roots_now_names != root_names:
-                    # This can happen if RLBench reorders/spawns roots mid-demo.
-                    # We hard-fail to avoid silently writing unusable snapshots.
-                    raise RuntimeError(
-                        "Top-level root set/order changed during demo.\n"
-                        f"start={root_names}\nnow={roots_now_names}"
-                    )
-
-                final_row = [get_configuration_tree_bytes(r) for r in roots_now]
+                models_now = get_top_level_models(pyrep)
+                if model_names is None:
+                    model_names = [m.get_name() for m in models_now]
+                final_row = [get_configuration_tree_bytes(m) for m in models_now]
 
                 # force last row to true final state
                 all_step_rows[-1] = final_row
@@ -511,37 +474,26 @@ def main():
                 elif snap_T > T:
                     all_step_rows = all_step_rows[:T]
 
-                R = len(root_names)
+                M = len(model_names)
                 K = int(k_idx.shape[0])
 
-                kf_mat = np.empty((K, R), dtype=object)
-                for rr, t in enumerate(k_idx.tolist()):
+                kf_mat = np.empty((K, M), dtype=object)
+                for r, t in enumerate(k_idx.tolist()):
                     row = all_step_rows[int(t)]
-                    for c in range(R):
+                    for c in range(M):
                         b = row[c]
                         if not isinstance(b, (bytes, bytearray)) or len(b) <= 1:
-                            raise RuntimeError(
-                                f"Bad snapshot bytes at t={t}, root={c}, "
-                                f"name={root_names[c]}, type={type(b)}, "
-                                f"len={len(b) if isinstance(b,(bytes,bytearray)) else 'NA'}"
-                            )
-                    kf_mat[rr, :] = row
+                            raise RuntimeError(f"Bad snapshot bytes at t={t}, model={c}, type={type(b)}, len={len(b) if isinstance(b,(bytes,bytearray)) else 'NA'}")
+                    kf_mat[r, :] = row
 
                 post_row = all_step_rows[T - 1]
                 post_arr = np.array(post_row, dtype=object)
                 for c, b in enumerate(post_arr.tolist()):
                     if not isinstance(b, (bytes, bytearray)) or len(b) <= 1:
-                        raise RuntimeError(
-                            f"Bad post snapshot bytes at root={c}, name={root_names[c]}, "
-                            f"type={type(b)}, len={len(b) if isinstance(b,(bytes,bytearray)) else 'NA'}"
-                        )
+                        raise RuntimeError(f"Bad post snapshot bytes at model={c}, type={type(b)}, len={len(b) if isinstance(b,(bytes,bytearray)) else 'NA'}")
 
-                traj["snapshot_storage"] = np.array(["bytes_v2_roots"], dtype="<U16")
-                traj["snapshot_root_names"] = np.array(root_names, dtype="<U256")
-                traj["snapshot_root_is_model"] = np.array(root_is_model, dtype=np.int32)
-                # Keep old key for compatibility: replay code can still read snapshot_model_names if needed
-                traj["snapshot_model_names"] = np.array(root_names, dtype="<U256")
-
+                traj["snapshot_storage"] = np.array(["bytes_v1"], dtype="<U16")
+                traj["snapshot_model_names"] = np.array(model_names, dtype="<U256")
                 traj["snapshot_keyframe_trees"] = kf_mat
                 traj["snapshot_post_trees"] = post_arr
                 traj["snapshot_captured"] = np.array([1], dtype=np.int32)
@@ -562,6 +514,7 @@ def main():
             traj["arm_action_mode"] = np.array(["JointVelocity"], dtype="<U64")
             traj["gripper_action_mode"] = np.array(["Discrete"], dtype="<U64")
 
+            # Explicitly document meanings
             traj["action_meaning_action_qpos"] = np.array(["[q_target_next(7), gripper_cmd_next(1)]"], dtype="<U96")
             traj["action_meaning_action_vel_fd"] = np.array(["[(q_next-q_now)/dt_used(7), gripper_cmd_next(1)]"], dtype="<U96")
             traj["action_meaning_action_vel_obs"] = np.array(["[obs_joint_vel(7), gripper_cmd_next(1)]"], dtype="<U96")
@@ -571,7 +524,6 @@ def main():
 
             print(f"[saved] {out_path}")
             print(f"  T={T}  keyframes={int(traj['keyframe_indices'].shape[0])}  snapshots={int(traj['snapshot_captured'][0])}")
-            print(f"  snapshot_storage={traj['snapshot_storage'][0]}  roots={len(traj.get('snapshot_root_names', []))}")
             print(f"  control_dt={float(traj['control_dt'][0])}  dt_used_for_vel_fd={float(traj['dt_used_for_vel_fd'][0])} (source={traj['dt_source_for_vel_fd'][0]})")
             print(f"  actions: action(alias)=action_qpos, plus action_vel_fd, action_vel_obs(if available)")
 
