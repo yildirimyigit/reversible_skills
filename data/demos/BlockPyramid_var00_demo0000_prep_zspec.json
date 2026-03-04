@@ -1,0 +1,24 @@
+{
+  "task": "BlockPyramid",
+  "variation": 0,
+  "snapshot_roots": [
+    "Wall1",
+    "block_pyramid",
+    "diningTable",
+    "remoteApi",
+    "workspace"
+  ],
+  "K_shapes": 8,
+  "K_joints": 4,
+  "shapes": [
+    "block_pyramid_block1",
+    "block_pyramid_block3",
+    "block_pyramid_block5",
+    "block_pyramid_block4",
+    "block_pyramid_block0",
+    "block_pyramid_block2"
+  ],
+  "joints": [],
+  "z_dim": 50,
+  "notes": "z=[gripper_pose(7),gripper_open(1),shape_pose(7)*Ks,joint_pos(1)*Kj]; candidates from final_snapshot_model_names when available"
+}

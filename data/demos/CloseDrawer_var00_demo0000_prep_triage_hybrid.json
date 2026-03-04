@@ -1,0 +1,504 @@
+{
+  "schema": "plan_a.rollback_triage.hybrid.v2",
+  "task": "CloseDrawer",
+  "variation": 0,
+  "demo_npz": "data/demos/CloseDrawer_var00_demo0000_prep.npz",
+  "zspec_json": "data/demos/CloseDrawer_var00_demo0000_prep_zspec.json",
+  "T": 76,
+  "start_idx": 0,
+  "keyframes_raw": [
+    0,
+    7,
+    14,
+    20,
+    27,
+    34,
+    41,
+    48,
+    55,
+    59,
+    61,
+    75
+  ],
+  "keyframes_sorted": [
+    0,
+    7,
+    14,
+    20,
+    27,
+    34,
+    41,
+    48,
+    55,
+    59,
+    61,
+    75
+  ],
+  "snapshot_roots_count": 13,
+  "params": {
+    "repeats": 5,
+    "kp": 4.0,
+    "vmax": 0.4,
+    "substeps_per_ref": 7,
+    "start_settle_steps": 10,
+    "end_settle_steps": 10,
+    "z_tol": 0.1,
+    "w_quat": 0.2,
+    "w_grip": 0.05,
+    "full_ok_rate": 0.8,
+    "disable_rendering": true,
+    "k_shapes": 5,
+    "k_joints": 1
+  },
+  "full_reversal": {
+    "success_rate": 0.0,
+    "trials": [
+      {
+        "rep": 0,
+        "steps_forward": 525,
+        "steps_backward": 525,
+        "z_dist": 0.20276853677213658,
+        "success": false
+      },
+      {
+        "rep": 1,
+        "steps_forward": 525,
+        "steps_backward": 525,
+        "z_dist": 0.2028259349687378,
+        "success": false
+      },
+      {
+        "rep": 2,
+        "steps_forward": 525,
+        "steps_backward": 525,
+        "z_dist": 0.2025759082479508,
+        "success": false
+      },
+      {
+        "rep": 3,
+        "steps_forward": 525,
+        "steps_backward": 525,
+        "z_dist": 0.20272205090700612,
+        "success": false
+      },
+      {
+        "rep": 4,
+        "steps_forward": 525,
+        "steps_backward": 525,
+        "z_dist": 0.20294128772255354,
+        "success": false
+      }
+    ]
+  },
+  "segments_ran": true,
+  "segment_results": [
+    {
+      "k_prev": 0,
+      "k_curr": 7,
+      "success_rate": 1.0,
+      "trials": [
+        {
+          "rep": 0,
+          "steps_total": 98,
+          "z_dist": 0.002359123998495253,
+          "success": true
+        },
+        {
+          "rep": 1,
+          "steps_total": 98,
+          "z_dist": 0.002659778215374732,
+          "success": true
+        },
+        {
+          "rep": 2,
+          "steps_total": 98,
+          "z_dist": 0.002723560618141869,
+          "success": true
+        },
+        {
+          "rep": 3,
+          "steps_total": 98,
+          "z_dist": 0.0029770289640974773,
+          "success": true
+        },
+        {
+          "rep": 4,
+          "steps_total": 98,
+          "z_dist": 0.0025945984687976687,
+          "success": true
+        }
+      ]
+    },
+    {
+      "k_prev": 7,
+      "k_curr": 14,
+      "success_rate": 1.0,
+      "trials": [
+        {
+          "rep": 0,
+          "steps_total": 147,
+          "z_dist": 0.008375704064971724,
+          "success": true
+        },
+        {
+          "rep": 1,
+          "steps_total": 147,
+          "z_dist": 0.009077073267949348,
+          "success": true
+        },
+        {
+          "rep": 2,
+          "steps_total": 147,
+          "z_dist": 0.008598447196053663,
+          "success": true
+        },
+        {
+          "rep": 3,
+          "steps_total": 147,
+          "z_dist": 0.008557685987291362,
+          "success": true
+        },
+        {
+          "rep": 4,
+          "steps_total": 147,
+          "z_dist": 0.008349112860610306,
+          "success": true
+        }
+      ]
+    },
+    {
+      "k_prev": 14,
+      "k_curr": 20,
+      "success_rate": 1.0,
+      "trials": [
+        {
+          "rep": 0,
+          "steps_total": 182,
+          "z_dist": 0.008068153821871994,
+          "success": true
+        },
+        {
+          "rep": 1,
+          "steps_total": 182,
+          "z_dist": 0.008563996202041372,
+          "success": true
+        },
+        {
+          "rep": 2,
+          "steps_total": 182,
+          "z_dist": 0.00828670833181861,
+          "success": true
+        },
+        {
+          "rep": 3,
+          "steps_total": 182,
+          "z_dist": 0.008604286526132172,
+          "success": true
+        },
+        {
+          "rep": 4,
+          "steps_total": 182,
+          "z_dist": 0.00846428425053716,
+          "success": true
+        }
+      ]
+    },
+    {
+      "k_prev": 20,
+      "k_curr": 27,
+      "success_rate": 1.0,
+      "trials": [
+        {
+          "rep": 0,
+          "steps_total": 238,
+          "z_dist": 0.008085469423013013,
+          "success": true
+        },
+        {
+          "rep": 1,
+          "steps_total": 238,
+          "z_dist": 0.008046352108239932,
+          "success": true
+        },
+        {
+          "rep": 2,
+          "steps_total": 238,
+          "z_dist": 0.008393106066827022,
+          "success": true
+        },
+        {
+          "rep": 3,
+          "steps_total": 238,
+          "z_dist": 0.007644519584785183,
+          "success": true
+        },
+        {
+          "rep": 4,
+          "steps_total": 238,
+          "z_dist": 0.008066534247568487,
+          "success": true
+        }
+      ]
+    },
+    {
+      "k_prev": 27,
+      "k_curr": 34,
+      "success_rate": 1.0,
+      "trials": [
+        {
+          "rep": 0,
+          "steps_total": 287,
+          "z_dist": 0.00815264934160611,
+          "success": true
+        },
+        {
+          "rep": 1,
+          "steps_total": 287,
+          "z_dist": 0.007668584934704468,
+          "success": true
+        },
+        {
+          "rep": 2,
+          "steps_total": 287,
+          "z_dist": 0.007637803369428573,
+          "success": true
+        },
+        {
+          "rep": 3,
+          "steps_total": 287,
+          "z_dist": 0.00754191178177983,
+          "success": true
+        },
+        {
+          "rep": 4,
+          "steps_total": 287,
+          "z_dist": 0.007366463192839138,
+          "success": true
+        }
+      ]
+    },
+    {
+      "k_prev": 34,
+      "k_curr": 41,
+      "success_rate": 1.0,
+      "trials": [
+        {
+          "rep": 0,
+          "steps_total": 336,
+          "z_dist": 0.006818419403123209,
+          "success": true
+        },
+        {
+          "rep": 1,
+          "steps_total": 336,
+          "z_dist": 0.006646325808529028,
+          "success": true
+        },
+        {
+          "rep": 2,
+          "steps_total": 336,
+          "z_dist": 0.006780395999254233,
+          "success": true
+        },
+        {
+          "rep": 3,
+          "steps_total": 336,
+          "z_dist": 0.006718796887972928,
+          "success": true
+        },
+        {
+          "rep": 4,
+          "steps_total": 336,
+          "z_dist": 0.006661574428433469,
+          "success": true
+        }
+      ]
+    },
+    {
+      "k_prev": 41,
+      "k_curr": 48,
+      "success_rate": 1.0,
+      "trials": [
+        {
+          "rep": 0,
+          "steps_total": 385,
+          "z_dist": 0.006228438102320895,
+          "success": true
+        },
+        {
+          "rep": 1,
+          "steps_total": 385,
+          "z_dist": 0.0059862272444043485,
+          "success": true
+        },
+        {
+          "rep": 2,
+          "steps_total": 385,
+          "z_dist": 0.006015411698991285,
+          "success": true
+        },
+        {
+          "rep": 3,
+          "steps_total": 385,
+          "z_dist": 0.005757847453685777,
+          "success": true
+        },
+        {
+          "rep": 4,
+          "steps_total": 385,
+          "z_dist": 0.006090830501759322,
+          "success": true
+        }
+      ]
+    },
+    {
+      "k_prev": 48,
+      "k_curr": 55,
+      "success_rate": 1.0,
+      "trials": [
+        {
+          "rep": 0,
+          "steps_total": 434,
+          "z_dist": 0.005219236413419113,
+          "success": true
+        },
+        {
+          "rep": 1,
+          "steps_total": 434,
+          "z_dist": 0.0053251298033651,
+          "success": true
+        },
+        {
+          "rep": 2,
+          "steps_total": 434,
+          "z_dist": 0.005307468399899437,
+          "success": true
+        },
+        {
+          "rep": 3,
+          "steps_total": 434,
+          "z_dist": 0.0053795417451965675,
+          "success": true
+        },
+        {
+          "rep": 4,
+          "steps_total": 434,
+          "z_dist": 0.0054085055554311135,
+          "success": true
+        }
+      ]
+    },
+    {
+      "k_prev": 55,
+      "k_curr": 59,
+      "success_rate": 1.0,
+      "trials": [
+        {
+          "rep": 0,
+          "steps_total": 441,
+          "z_dist": 0.002459913094063764,
+          "success": true
+        },
+        {
+          "rep": 1,
+          "steps_total": 441,
+          "z_dist": 0.0026124949155295184,
+          "success": true
+        },
+        {
+          "rep": 2,
+          "steps_total": 441,
+          "z_dist": 0.002553828917633463,
+          "success": true
+        },
+        {
+          "rep": 3,
+          "steps_total": 441,
+          "z_dist": 0.0026136092156500796,
+          "success": true
+        },
+        {
+          "rep": 4,
+          "steps_total": 441,
+          "z_dist": 0.0025657363903236804,
+          "success": true
+        }
+      ]
+    },
+    {
+      "k_prev": 59,
+      "k_curr": 61,
+      "success_rate": 1.0,
+      "trials": [
+        {
+          "rep": 0,
+          "steps_total": 441,
+          "z_dist": 0.00022105173315315198,
+          "success": true
+        },
+        {
+          "rep": 1,
+          "steps_total": 441,
+          "z_dist": 0.00032592141278182983,
+          "success": true
+        },
+        {
+          "rep": 2,
+          "steps_total": 441,
+          "z_dist": 0.00021484847884905718,
+          "success": true
+        },
+        {
+          "rep": 3,
+          "steps_total": 441,
+          "z_dist": 0.00024897410161653886,
+          "success": true
+        },
+        {
+          "rep": 4,
+          "steps_total": 441,
+          "z_dist": 0.00022549442588291958,
+          "success": true
+        }
+      ]
+    },
+    {
+      "k_prev": 61,
+      "k_curr": 75,
+      "success_rate": 0.0,
+      "trials": [
+        {
+          "rep": 0,
+          "steps_total": 623,
+          "z_dist": 0.20228902819296463,
+          "success": false
+        },
+        {
+          "rep": 1,
+          "steps_total": 623,
+          "z_dist": 0.2022220433156935,
+          "success": false
+        },
+        {
+          "rep": 2,
+          "steps_total": 623,
+          "z_dist": 0.2022681993000049,
+          "success": false
+        },
+        {
+          "rep": 3,
+          "steps_total": 623,
+          "z_dist": 0.2022630641348398,
+          "success": false
+        },
+        {
+          "rep": 4,
+          "steps_total": 623,
+          "z_dist": 0.2022828365334903,
+          "success": false
+        }
+      ]
+    }
+  ],
+  "suggested_split_idx": 61
+}

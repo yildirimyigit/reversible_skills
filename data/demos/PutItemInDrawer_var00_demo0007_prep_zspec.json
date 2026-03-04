@@ -1,0 +1,24 @@
+{
+  "task": "PutItemInDrawer",
+  "variation": 0,
+  "snapshot_roots": [
+    "Wall1",
+    "diningTable",
+    "put_item_in_drawer",
+    "remoteApi",
+    "workspace"
+  ],
+  "K_shapes": 8,
+  "K_joints": 4,
+  "shapes": [
+    "item",
+    "drawer_top",
+    "drawer_legs",
+    "drawer_frame",
+    "drawer_bottom",
+    "drawer_middle"
+  ],
+  "joints": [],
+  "z_dim": 50,
+  "notes": "z=[gripper_pose(7),gripper_open(1),shape_pose(7)*Ks,joint_pos(1)*Kj]; candidates from final_snapshot_model_names when available"
+}

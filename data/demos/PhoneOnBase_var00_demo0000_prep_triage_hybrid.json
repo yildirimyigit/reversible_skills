@@ -1,0 +1,96 @@
+{
+  "schema": "plan_a.rollback_triage.hybrid.v2",
+  "task": "PhoneOnBase",
+  "variation": 0,
+  "demo_npz": "data/demos/PhoneOnBase_var00_demo0000_prep.npz",
+  "zspec_json": "data/demos/PhoneOnBase_var00_demo0000_prep_zspec.json",
+  "T": 237,
+  "start_idx": 0,
+  "keyframes_raw": [
+    0,
+    21,
+    43,
+    64,
+    86,
+    107,
+    126,
+    129,
+    150,
+    172,
+    235,
+    236
+  ],
+  "keyframes_sorted": [
+    0,
+    21,
+    43,
+    64,
+    86,
+    107,
+    126,
+    129,
+    150,
+    172,
+    235,
+    236
+  ],
+  "snapshot_roots_count": 13,
+  "params": {
+    "repeats": 5,
+    "kp": 4.0,
+    "vmax": 0.4,
+    "substeps_per_ref": 7,
+    "start_settle_steps": 10,
+    "end_settle_steps": 10,
+    "z_tol": 0.1,
+    "w_quat": 0.2,
+    "w_grip": 0.05,
+    "full_ok_rate": 0.8,
+    "disable_rendering": true,
+    "k_shapes": 4,
+    "k_joints": 0
+  },
+  "full_reversal": {
+    "success_rate": 1.0,
+    "trials": [
+      {
+        "rep": 0,
+        "steps_forward": 1652,
+        "steps_backward": 1652,
+        "z_dist": 0.018106444041110878,
+        "success": true
+      },
+      {
+        "rep": 1,
+        "steps_forward": 1652,
+        "steps_backward": 1652,
+        "z_dist": 0.01722901528839046,
+        "success": true
+      },
+      {
+        "rep": 2,
+        "steps_forward": 1652,
+        "steps_backward": 1652,
+        "z_dist": 0.015456024441155892,
+        "success": true
+      },
+      {
+        "rep": 3,
+        "steps_forward": 1652,
+        "steps_backward": 1652,
+        "z_dist": 0.020785973988940585,
+        "success": true
+      },
+      {
+        "rep": 4,
+        "steps_forward": 1652,
+        "steps_backward": 1652,
+        "z_dist": 0.01842061173760072,
+        "success": true
+      }
+    ]
+  },
+  "segments_ran": false,
+  "segment_results": [],
+  "suggested_split_idx": null
+}
