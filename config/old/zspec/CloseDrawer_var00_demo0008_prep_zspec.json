@@ -1,0 +1,24 @@
+{
+  "task": "CloseDrawer",
+  "variation": 0,
+  "snapshot_roots": [
+    "DefaultLights",
+    "Panda",
+    "ResizableFloor_5_25",
+    "XYZCameraProxy",
+    "close_drawer",
+    "diningTable"
+  ],
+  "K_shapes": 8,
+  "K_joints": 4,
+  "shapes": [
+    "drawer_bottom",
+    "drawer_top",
+    "drawer_middle",
+    "drawer_legs",
+    "drawer_frame"
+  ],
+  "joints": [],
+  "z_dim": 43,
+  "notes": "z=[gripper_pose(7),gripper_open(1),shape_pose(7)*Ks,joint_pos(1)*Kj], shapes are non-Dummy movers, joints are movers"
+}

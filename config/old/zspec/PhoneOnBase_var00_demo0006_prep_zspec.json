@@ -1,0 +1,23 @@
+{
+  "task": "PhoneOnBase",
+  "variation": 0,
+  "snapshot_roots": [
+    "DefaultLights",
+    "Panda",
+    "ResizableFloor_5_25",
+    "XYZCameraProxy",
+    "diningTable",
+    "phone_on_base"
+  ],
+  "K_shapes": 8,
+  "K_joints": 4,
+  "shapes": [
+    "phone_case",
+    "phone_case_visual",
+    "phone_visual",
+    "phone"
+  ],
+  "joints": [],
+  "z_dim": 36,
+  "notes": "z=[gripper_pose(7),gripper_open(1),shape_pose(7)*Ks,joint_pos(1)*Kj], shapes are non-Dummy movers, joints are movers"
+}

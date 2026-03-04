@@ -1,0 +1,22 @@
+{
+  "task": "ScoopWithSpatula",
+  "variation": 0,
+  "snapshot_roots": [
+    "DefaultLights",
+    "Panda",
+    "ResizableFloor_5_25",
+    "XYZCameraProxy",
+    "diningTable",
+    "scoop_with_spatula"
+  ],
+  "K_shapes": 8,
+  "K_joints": 4,
+  "shapes": [
+    "Cuboid",
+    "scoop_with_spatula_spatula",
+    "spatula_visual"
+  ],
+  "joints": [],
+  "z_dim": 29,
+  "notes": "z=[gripper_pose(7),gripper_open(1),shape_pose(7)*Ks,joint_pos(1)*Kj], shapes are non-Dummy movers, joints are movers"
+}
