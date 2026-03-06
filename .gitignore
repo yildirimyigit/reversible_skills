@@ -7,5 +7,5 @@ RLBench/
 *pycache*/
 *.zip
 *.pkl
-runs/reverse_skill/
+runs/
 results/
