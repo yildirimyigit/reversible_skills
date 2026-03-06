@@ -140,6 +140,7 @@ class ReverseSuffixEnv(gym.Env):
         settle_steps: int = 10,
         joint_vel_clip: float = 1.0,
         seed: int = 0,
+        render: bool = False,
     ):
         super().__init__()
 
@@ -160,6 +161,7 @@ class ReverseSuffixEnv(gym.Env):
         self.reset_mode = reset_mode
         self.settle_steps = int(settle_steps)
         self.joint_vel_clip = float(joint_vel_clip)
+        self.render = bool(render)
 
         self._rng = np.random.default_rng(seed)
 
@@ -209,6 +211,8 @@ class ReverseSuffixEnv(gym.Env):
         if self._env is not None:
             return
 
+        headless = (not self.render)
+
         obs_config = ObservationConfig()
         obs_config.set_all_low_dim(True)
         obs_config.set_all_high_dim(False)
@@ -221,7 +225,7 @@ class ReverseSuffixEnv(gym.Env):
         self._env = Environment(
             action_mode=action_mode,
             obs_config=obs_config,
-            headless=True
+            headless=headless
         )
         self._env.launch()
 
