@@ -55,7 +55,6 @@ def load_split_idx(consensus_json: str, task: str, variation: int) -> int:
         )
     return int(rec)
 
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--task", required=True)
