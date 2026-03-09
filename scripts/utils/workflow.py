@@ -1,183 +1,229 @@
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyBboxPatch, FancyArrowPatch, Polygon, Rectangle, Circle
 import numpy as np
+from pathlib import Path
 
-fig, ax = plt.subplots(figsize=(16, 6), dpi=200)
-ax.set_xlim(0, 16)
-ax.set_ylim(0, 6)
+fig, ax = plt.subplots(figsize=(16.8, 6.9), dpi=220)
+ax.set_xlim(0, 16.8)
+ax.set_ylim(0, 6.9)
 ax.axis("off")
 
-panel_colors = ["#D8EAF7", "#F4DFC7", "#DDEDCF", "#E5DDF3", "#F6D6D8"]
-edge = "#333333"
-box_fill = "#F8F8F8"
+edge = "#3A3A3A"
+box_fill = "#F7F7F7"
+panel_colors = ["#DCE9F3", "#F0DFC9", "#DCE7D4", "#E3DCEF"]
 
 panels = [
-    (0.2, 0.35, 2.8, 5.25, panel_colors[0], "Forward Data Collection"),
-    (3.15, 0.35, 2.7, 5.25, panel_colors[1], "State Abstraction"),
-    (6.0, 0.35, 3.1, 5.25, panel_colors[2], "Rollback Triage"),
-    (9.3, 0.35, 3.5, 5.25, panel_colors[3], "Reverse Policy Learning"),
-    (13.0, 0.35, 2.8, 5.25, panel_colors[4], "Evaluation and Deployment"),
+    (0.30, 0.42, 3.45, 5.95, panel_colors[0], "Forward Data\nCollection"),
+    (3.95, 0.42, 3.30, 5.95, panel_colors[1], "State Abstraction"),
+    (7.45, 0.42, 3.95, 5.95, panel_colors[2], "Rollback Triage"),
+    (11.60, 0.42, 4.60, 5.95, panel_colors[3], "Reverse Policy Learning"),
 ]
 
 for x, y, w, h, c, title in panels:
-    rr = FancyBboxPatch(
-        (x, y),
-        w,
-        h,
+    p = FancyBboxPatch(
+        (x, y), w, h,
         boxstyle="round,pad=0.02,rounding_size=0.08",
-        linewidth=1.5,
-        edgecolor=edge,
-        facecolor=c,
+        linewidth=1.5, edgecolor=edge, facecolor=c
     )
-    ax.add_patch(rr)
+    ax.add_patch(p)
     ax.text(
-        x + w / 2,
-        y + h - 0.28,
-        title,
-        ha="center",
-        va="top",
-        fontsize=13,
-        fontweight="bold",
-        color=edge,
+        x + w / 2, y + h - 0.38, title,
+        ha="center", va="top",
+        fontsize=15, fontweight="bold", color=edge, linespacing=1.0
     )
 
-def rbox(x, y, w, h, text, fontsize=10, weight="bold"):
+def rbox(x, y, w, h, text, fontsize=10, weight="bold", fc=box_fill):
     b = FancyBboxPatch(
-        (x, y),
-        w,
-        h,
+        (x, y), w, h,
         boxstyle="round,pad=0.02,rounding_size=0.06",
-        linewidth=1.3,
-        edgecolor=edge,
-        facecolor=box_fill,
+        linewidth=1.25, edgecolor=edge, facecolor=fc
     )
     ax.add_patch(b)
     ax.text(
-        x + w / 2,
-        y + h / 2,
-        text,
-        ha="center",
-        va="center",
-        fontsize=fontsize,
-        fontweight=weight,
-        color=edge,
+        x + w / 2, y + h / 2, text,
+        ha="center", va="center",
+        fontsize=fontsize, fontweight=weight, color=edge, linespacing=1.0
     )
     return b
 
-def arrow(x1, y1, x2, y2, text=None, fs=9, rad=0.0, style="-|>"):
+def arrow(x1, y1, x2, y2, text=None, fs=9, rad=0.0, dx=0.0, dy=0.0, lw=1.4):
     a = FancyArrowPatch(
-        (x1, y1),
-        (x2, y2),
-        arrowstyle=style,
-        mutation_scale=12,
+        (x1, y1), (x2, y2),
+        arrowstyle="-|>", mutation_scale=12,
         connectionstyle=f"arc3,rad={rad}",
-        linewidth=1.4,
-        color=edge,
+        linewidth=lw, color=edge
     )
     ax.add_patch(a)
     if text:
         ax.text(
-            (x1 + x2) / 2,
-            (y1 + y2) / 2 + 0.12,
-            text,
-            ha="center",
-            va="center",
-            fontsize=fs,
-            color=edge,
+            (x1 + x2) / 2 + dx, (y1 + y2) / 2 + dy,
+            text, ha="center", va="center", fontsize=fs, color=edge
         )
-    return a
 
-# Panel 1
-plot_x0, plot_y0, plot_w, plot_h = 0.45, 3.15, 1.3, 1.8
-ax.add_patch(Rectangle((plot_x0, plot_y0), plot_w, plot_h, linewidth=1.0, edgecolor="#888", facecolor="white"))
-t = np.linspace(0, 1, 100)
-y = 0.55 + 0.25 * np.sin(2 * np.pi * (t + 0.12)) + 0.15 * t
-ax.plot(plot_x0 + 0.08 + t * (plot_w - 0.16), plot_y0 + 0.1 + y * (plot_h - 0.2), lw=2)
-for ti in [0.18, 0.48, 0.82]:
-    yi = 0.55 + 0.25 * np.sin(2 * np.pi * (ti + 0.12)) + 0.15 * ti
-    ax.add_patch(Circle((plot_x0 + 0.08 + ti * (plot_w - 0.16), plot_y0 + 0.1 + yi * (plot_h - 0.2)), 0.03, color="#555"))
-ax.text(plot_x0 + plot_w / 2, plot_y0 + plot_h + 0.08, "Forward trajectory", ha="center", va="bottom", fontsize=9, color=edge)
+# ---------------- Panel 1 ----------------
+px, py, pw, ph = 0.62, 3.05, 1.62, 2.10
+ax.add_patch(Rectangle((px, py), pw, ph, linewidth=1.0, edgecolor="#8A8A8A", facecolor="white"))
 
-rbox(1.95, 3.75, 0.75, 0.78, "Forward\nskill", fontsize=10)
-rbox(1.95, 2.55, 0.75, 0.78, "Recorder", fontsize=10)
+t = np.linspace(0, 1, 120)
+curve = 0.60 + 0.22 * np.sin(2 * np.pi * (t + 0.15)) + 0.10 * t
+ax.plot(px + 0.10 + t * (pw - 0.20), py + 0.12 + curve * (ph - 0.24), lw=2.3)
+
+for ti in [0.16, 0.50, 0.82]:
+    yi = 0.60 + 0.22 * np.sin(2 * np.pi * (ti + 0.15)) + 0.10 * ti
+    ax.add_patch(Circle(
+        (px + 0.10 + ti * (pw - 0.20), py + 0.12 + yi * (ph - 0.24)),
+        0.03, color="#575757"
+    ))
+
+ax.text(px + pw / 2, py + ph + 0.10, "Forward trajectory",
+        ha="center", va="bottom", fontsize=10, color=edge)
+
+rbox(2.42, 3.78, 0.98, 0.98, "Forward\nskill", fontsize=10)
+rbox(2.42, 2.52, 0.98, 0.98, "Recorder", fontsize=10)
+
 for i in range(3):
-    ax.add_patch(Rectangle((0.65 + 0.06 * i, 1.18 + 0.04 * i), 0.62, 0.75, linewidth=1.0, edgecolor=edge, facecolor="white"))
-ax.text(0.98, 1.55, "demo\nnpz", ha="center", va="center", fontsize=10, fontweight="bold", color=edge)
-ax.text(1.85, 1.55, "actions\nsnapshots\nkeyframes", ha="left", va="center", fontsize=9, color=edge)
-arrow(1.75, 4.05, 1.95, 4.14)
-arrow(2.33, 3.75, 2.33, 3.33)
-arrow(2.15, 2.55, 1.35, 1.92)
+    ax.add_patch(Rectangle(
+        (0.90 + 0.06 * i, 1.18 + 0.05 * i),
+        0.74, 0.86,
+        linewidth=1.0, edgecolor=edge, facecolor="white"
+    ))
 
-# Panel 2
-rbox(3.55, 4.0, 1.9, 0.72, "Snapshot utils", fontsize=11)
-rbox(3.55, 2.95, 1.9, 0.72, "Compact state  z(s)", fontsize=11)
-rbox(3.55, 1.9, 1.9, 0.72, "Keyframes and boundary\ncandidates", fontsize=10)
-arrow(4.5, 4.0, 4.5, 3.67)
-arrow(4.5, 2.95, 4.5, 2.62)
-for i, txt in enumerate(["ee pose", "gripper", "object", "top-K"]):
-    ax.add_patch(Rectangle((5.08, 2.98 - 0.17 * i), 0.52, 0.12, linewidth=0.8, edgecolor=edge, facecolor="white"))
-    ax.text(5.34, 3.04 - 0.17 * i, txt, ha="center", va="center", fontsize=6.7, color=edge)
-arrow(2.98, 1.78, 3.15, 1.78, text="preprocess", fs=8)
+ax.text(1.27, 1.61, "demo\nnpz", ha="center", va="center",
+        fontsize=10, fontweight="bold", color=edge)
+ax.text(2.30, 1.53, "actions\nsnapshots\nkeyframes",
+        ha="left", va="center", fontsize=10, color=edge)
 
-# Panel 3
-plot2_x0, plot2_y0, plot2_w, plot2_h = 6.25, 3.1, 1.25, 1.85
-ax.add_patch(Rectangle((plot2_x0, plot2_y0), plot2_w, plot2_h, linewidth=1.0, edgecolor="#888", facecolor="white"))
-t = np.linspace(0, 1, 100)
-y = 0.6 + 0.18 * np.sin(2 * np.pi * (t + 0.05)) - 0.22 * t + 0.25 * t**2
-ax.plot(plot2_x0 + 0.08 + t * (plot2_w - 0.16), plot2_y0 + 0.1 + y * (plot2_h - 0.2), lw=2)
-split_t = 0.62
-sx = plot2_x0 + 0.08 + split_t * (plot2_w - 0.16)
-ax.plot([sx, sx], [plot2_y0 + 0.08, plot2_y0 + plot2_h - 0.08], lw=1.8, ls="--")
-ax.text(plot2_x0 + plot2_w / 2, plot2_y0 + plot2_h + 0.08, "Rollback scores", ha="center", va="bottom", fontsize=9, color=edge)
-rbox(7.75, 4.02, 1.0, 0.72, "Rollback\nattempts", fontsize=10)
-rbox(7.75, 2.9, 1.0, 0.72, "Consensus\nsplit", fontsize=10)
-rbox(6.45, 1.5, 2.2, 0.72, "Boundary snapshot goal", fontsize=11)
-diamond = Polygon([[8.3, 2.15], [8.85, 1.8], [8.3, 1.45], [7.75, 1.8]], closed=True, linewidth=1.3, edgecolor=edge, facecolor="white")
+arrow(2.24, 4.10, 2.42, 4.22)
+arrow(2.91, 3.78, 2.91, 3.48)
+arrow(2.42, 2.54, 1.64, 1.92)
+
+arrow(3.75, 2.95, 3.95, 2.95)
+ax.text(3.85, 3.12, "preprocess", ha="center", va="center",
+        fontsize=9, color=edge)
+
+# ---------------- Panel 2 ----------------
+rbox(4.35, 4.22, 2.55, 0.84, "Snapshot utils", fontsize=12)
+rbox(4.35, 2.97, 2.55, 0.84, "Compact state\nz(s)", fontsize=12)
+rbox(4.35, 1.72, 2.55, 0.84, "Keyframes\nand boundary\ncandidates", fontsize=11)
+
+arrow(5.62, 4.22, 5.62, 3.81)
+arrow(5.62, 2.97, 5.62, 2.56)
+
+# cleaner than four tiny overlapping boxes
+ax.text(
+    6.7, 3.0,
+    "ee pose\ngripper\ntop-K\nobject",
+    ha="center", va="center",
+    fontsize=8.3, color=edge,
+    bbox=dict(
+        boxstyle="round,pad=0.18,rounding_size=0.04",
+        facecolor="white", edgecolor=edge, linewidth=0.8
+    )
+)
+
+arrow(7.25, 2.95, 7.45, 2.95)
+ax.text(7.35, 3.12, "triage", ha="center", va="center",
+        fontsize=9, color=edge)
+
+# ---------------- Panel 3 ----------------
+rx, ry, rw, rh = 7.82, 3.20, 1.65, 2.15
+ax.add_patch(Rectangle((rx, ry), rw, rh, linewidth=1.0, edgecolor="#8A8A8A", facecolor="white"))
+
+u = np.linspace(0, 1, 140)
+curve2 = 0.62 + 0.18 * np.sin(2 * np.pi * (u + 0.08)) - 0.16 * u + 0.16 * u**2
+ax.plot(rx + 0.10 + u * (rw - 0.20), ry + 0.12 + curve2 * (rh - 0.24), lw=2.4)
+
+sx = rx + 0.10 + 0.60 * (rw - 0.20)
+ax.plot([sx, sx], [ry + 0.10, ry + rh - 0.10],
+        lw=2.2, ls="--", color="#29963A")
+
+ax.text(rx + rw / 2, ry + rh + 0.10, "Rollback scores",
+        ha="center", va="bottom", fontsize=10, color=edge)
+
+rbox(9.78, 4.02, 1.18, 0.88, "Rollback\nattempts", fontsize=10)
+rbox(9.78, 2.78, 1.18, 0.88, "Consensus\nsplit", fontsize=10)
+rbox(7.75, 1.72, 2.10, 0.76, "Boundary\nsnapshot goal", fontsize=11)
+
+diamond = Polygon(
+    [[10.58, 1.52], [11.16, 1.10], [10.58, 0.68], [10.0, 1.10]],
+    closed=True, linewidth=1.25, edgecolor=edge, facecolor="white"
+)
 ax.add_patch(diamond)
-ax.text(8.3, 1.8, "Likely\nreversible?", ha="center", va="center", fontsize=8.5, fontweight="bold", color=edge)
-arrow(7.5, 4.02, 7.5, 3.62)
-arrow(7.75, 3.25, 7.5, 3.25)
-arrow(8.25, 2.9, 8.25, 2.23)
-arrow(5.85, 2.2, 6.0, 2.2, text="triage", fs=8)
-ax.text(7.05, 0.73, "choose the reversible prefix and\nidentify the irreversible suffix", ha="center", va="center", fontsize=9, color=edge)
+ax.text(10.58, 1.15, "Likely\nreversible?",
+        ha="center", va="center", fontsize=9.0,
+        fontweight="bold", color=edge)
 
-# Panel 4
-rbox(9.62, 4.12, 1.15, 0.74, "Direct\nreversed\nrollout", fontsize=10)
-rbox(10.98, 4.12, 1.15, 0.74, "Reversed\nBC prior", fontsize=10)
-rbox(10.98, 2.8, 1.15, 0.74, "Residual\nSAC", fontsize=10)
-rbox(12.28, 3.36, 0.32, 0.32, "+", fontsize=16)
-rbox(11.95, 1.52, 0.62, 0.72, "Reverse\nexecutor", fontsize=10)
-arrow(8.85, 1.92, 9.62, 4.12, text="yes", fs=8, rad=0.1)
-arrow(8.85, 1.68, 10.98, 4.12, text="no", fs=8, rad=-0.1)
-arrow(11.55, 4.12, 11.55, 3.54)
-arrow(11.55, 2.8, 11.55, 2.24)
-arrow(12.12, 3.36, 11.55, 3.17)
-arrow(12.6, 3.52, 13.0, 3.52, text="policy", fs=8)
-arrow(8.3, 1.45, 12.25, 1.88, text="goal = boundary snapshot", fs=8, rad=-0.05)
-ax.text(11.1, 0.77, "train only when direct reversal is\nunlikely to succeed", ha="center", va="center", fontsize=9, color=edge)
+arrow(9.47, 4.46, 9.78, 4.46)
+arrow(10.37, 4.02, 10.37, 3.66)
+arrow(9.78, 3.22, 9.54, 3.22)
+arrow(10.37, 2.78, 10.37, 2.48)
 
-# Panel 5
-rbox(13.35, 4.15, 2.05, 0.72, "Full reverse execution", fontsize=11)
-rbox(13.35, 3.0, 2.05, 0.72, "Benchmarks and figures", fontsize=11)
-rbox(13.35, 1.85, 2.05, 0.72, "Real robot validation", fontsize=11)
-arrow(14.38, 4.15, 14.38, 3.72)
-arrow(14.38, 3.0, 14.38, 2.57)
-ax.add_patch(Circle((13.68, 0.98), 0.12, edgecolor=edge, facecolor="white", linewidth=1.0))
-ax.plot([13.68, 13.68], [0.86, 0.55], color=edge, lw=1.2)
-ax.plot([13.68, 13.53], [0.78, 0.66], color=edge, lw=1.2)
-ax.plot([13.68, 13.83], [0.78, 0.66], color=edge, lw=1.2)
-ax.plot([13.68, 13.57], [0.55, 0.35], color=edge, lw=1.2)
-ax.plot([13.68, 13.79], [0.55, 0.35], color=edge, lw=1.2)
-ax.text(14.68, 0.98, "ROC / calibration\nsuccess vs steps\ngeneralization", ha="center", va="center", fontsize=8.5, color=edge)
+# boundary -> decision
+arrow(9.85, 1.72, 10.40, 1.42)
 
-for x1, x2, y in [(3.0, 3.15, 3.0), (5.85, 6.0, 3.0), (9.1, 9.3, 3.0), (12.8, 13.0, 3.0)]:
-    arrow(x1, y, x2, y)
+ax.text(
+    9.44, 0.66,
+    "choose the reversible\nprefix and identify the irreversible suffix",
+    ha="center", va="center",
+    fontsize=10, color=edge, linespacing=1.0
+)
 
-ax.text(8, 5.92, "PLAN-A: From Forward Demonstrations to Reverse Skill Execution", ha="center", va="top", fontsize=16, fontweight="bold", color=edge)
+arrow(11.40, 2.95, 11.60, 2.95)
 
-png_path = "workflow.png"
-svg_path = "workflow.svg"
+# ---------------- Panel 4 ----------------
+rbox(12.00, 4.18, 1.50, 0.98, "Direct\nreversed\nrollout", fontsize=10)
+rbox(14.00, 4.18, 1.50, 0.98, "Reversed\nBC prior", fontsize=10)
+rbox(14.00, 2.80, 1.50, 0.98, "Residual\nSAC", fontsize=10)
+rbox(14.10, 1.62, 1.35, 0.86, "Reverse\nexecutor", fontsize=10)
+
+arrow(11.06, 1.24, 12.00, 4.18, rad=0.10)
+ax.text(11.82, 2.95, "yes", fontsize=9, color=edge)
+
+arrow(11.06, 1.04, 14.00, 4.18, rad=-0.06)
+ax.text(12.43, 2.55, "no", fontsize=9, color=edge)
+
+# direct reversed rollout -> executor
+arrow(12.75, 4.18, 14.55, 2.48, rad=-0.10)
+
+# BC -> residual -> executor
+arrow(14.75, 4.18, 14.75, 3.78)
+arrow(14.75, 2.80, 14.75, 2.48)
+
+# boundary goal -> executor
+arrow(9.85, 1.96, 14.10, 2.02, rad=-0.02)
+ax.text(12.35, 1.70, "goal = boundary\nsnapshot",
+        fontsize=9, color=edge)
+
+ax.text(
+    13.95, 0.92,
+    "train only when direct reversal is\nunlikely to succeed",
+    ha="center", va="center",
+    fontsize=10, color=edge, linespacing=1.0
+)
+
+# ---------------- Main title ----------------
+ax.text(
+    8.40, 6.60,
+    "From Forward Demonstrations to Reverse Skill Execution",
+    ha="center", va="center",
+    fontsize=19, fontweight="bold", color=edge
+)
+
+# save next to the script if this is run as a script,
+# otherwise save into the current working directory
+try:
+    root_path = Path(__file__).resolve().parent
+except NameError:
+    root_path = Path.cwd()
+
+png_path = root_path / "workflow.png"
+svg_path = root_path / "workflow.svg"
+pdf_path = root_path / "workflow.pdf"
+
 plt.savefig(png_path, bbox_inches="tight", facecolor="white")
 plt.savefig(svg_path, bbox_inches="tight", facecolor="white")
+plt.savefig(pdf_path, bbox_inches="tight", facecolor="white")
+
 print(png_path)
 print(svg_path)
+print(pdf_path)
