@@ -142,7 +142,7 @@ class ReverseSuffixEnv(gym.Env):
         joint_vel_clip: float = 1.0,
         seed: int = 0,
         render: bool = False,
-        time_penalty: float = 0.001,
+        time_penalty: float = 0.01,
         action_penalty: float = 0.0005,
         grip_toggle_penalty: float = 0.001,
     ):
