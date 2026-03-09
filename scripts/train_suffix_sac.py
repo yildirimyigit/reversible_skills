@@ -9,7 +9,8 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from stable_baselines3.common.monitor import Monitor
 
 from rl_wrapper_suffix import ReverseSuffixEnv, DemoSnapshots, SplitSpec
-from rollback_triage import get_keyframe_rows  # from your rollback_triage.py
+from rollback_triage import get_keyframe_rows
+from policy_io_suffix import DEFAULT_SUFFIX_OBS_SPEC
 
 
 def load_demo_snaps(prep_npz_path: str) -> DemoSnapshots:
@@ -22,13 +23,32 @@ def load_demo_snaps(prep_npz_path: str) -> DemoSnapshots:
     # keyframes
     trees_kR, kf, _root_names = get_keyframe_rows(d)
 
-    # final snapshot trees
-    if "final_snapshot_trees" not in d.files:
-        raise RuntimeError("final_snapshot_trees missing in prep npz.")
-    final_1d = list(np.asarray(d["final_snapshot_trees"], dtype=object).tolist())
+    # final snapshot trees + final gripper metadata
+    if "snapshot_post_trees" in d.files:
+        final_1d = list(np.asarray(d["snapshot_post_trees"], dtype=object).tolist())
+        final_g = (
+            float(np.asarray(d["final_gripper_open"], dtype=np.float32).ravel()[0])
+            if "final_gripper_open" in d.files
+            else float(g_ref[-1])
+        )
+        final_settle = (
+            int(np.asarray(d["final_settle_steps"], dtype=np.int32).ravel()[0])
+            if "final_settle_steps" in d.files
+            else 10
+        )
+    else:
+        if "final_snapshot_trees" not in d.files:
+            raise RuntimeError(
+                "Neither snapshot_post_trees nor final_snapshot_trees found in prep npz."
+            )
+        final_1d = list(np.asarray(d["final_snapshot_trees"], dtype=object).tolist())
+        final_g = float(g_ref[-1])
+        final_settle = 10
 
     return DemoSnapshots(
         final_snapshot_trees_1d=final_1d,
+        final_gripper_open=float(final_g),
+        final_settle_steps=int(final_settle),
         keyframe_trees_kR=trees_kR,
         keyframe_indices=np.asarray(kf, dtype=np.int64),
         q_ref=q_ref,
@@ -43,17 +63,23 @@ def load_split_idx(consensus_json: str, task: str, variation: int) -> int:
     groups = data.get("groups", {})
     group_key = f"{task}__var{int(variation):02d}"
     if group_key not in groups:
-        raise KeyError(f"{group_key} not found in consensus file. Available: {list(groups.keys())[:8]}...")
+        raise KeyError(
+            f"{group_key} not found in consensus file. "
+            f"Available: {list(groups.keys())[:8]}..."
+        )
 
     g = groups[group_key]
     rec = g.get("recommended_split_idx", None)
 
     if rec is None:
         raise ValueError(
-            f"{group_key} has recommended_split_idx=null (accepted={g.get('accepted')}, support={g.get('support')}). "
-            "Choose a task/variation with an accepted split (e.g., CloseDrawer var00 or PutItemInDrawer var00)."
+            f"{group_key} has recommended_split_idx=null "
+            f"(accepted={g.get('accepted')}, support={g.get('support')}). "
+            "Choose a task/variation with an accepted split "
+            "(e.g., CloseDrawer var00 or PutItemInDrawer var00)."
         )
     return int(rec)
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -72,6 +98,7 @@ def main():
     ap.add_argument("--goal_hold", type=int, default=5)
 
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--render", action="store_true")
     args = ap.parse_args()
 
     os.makedirs(args.outdir, exist_ok=True)
@@ -86,7 +113,7 @@ def main():
             variation=args.variation,
             demo_snaps=demo_snaps,
             split_spec=split_spec,
-            obs_dim=15,  # from your check_reset
+            obs_spec=DEFAULT_SUFFIX_OBS_SPEC,
             max_steps=args.max_steps,
             goal_tol=args.goal_tol,
             goal_hold_steps=args.goal_hold,
@@ -94,8 +121,16 @@ def main():
             reset_mode="final",
             zspec_json_path=args.zspec_json,
             seed=args.seed,
+            render=args.render,
         )
         return Monitor(env)
+
+    # Probe once so you can verify the shared observation contract
+    probe_env = make_env()
+    print(f"[info] split_idx={split_idx}")
+    print(f"[info] obs_dim={probe_env.observation_space.shape[0]}")
+    print(f"[info] act_dim={probe_env.action_space.shape[0]}")
+    probe_env.close()
 
     venv = DummyVecEnv([make_env])
     venv = VecNormalize(venv, norm_obs=True, norm_reward=False, clip_obs=10.0)

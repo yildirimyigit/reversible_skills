@@ -6,11 +6,23 @@ import numpy as np
 from stable_baselines3 import SAC
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
-from rl_wrapper_suffix import ReverseSuffixEnv, DemoSnapshots, SplitSpec
-from train_suffix_sac import load_demo_snaps, load_split_idx  # reuse your loaders
+from rl_wrapper_suffix import ReverseSuffixEnv, SplitSpec
+from train_suffix_sac import load_demo_snaps, load_split_idx
+from policy_io_suffix import DEFAULT_SUFFIX_OBS_SPEC
 
 
-def make_env(task, variation, prep_npz, zspec_json, consensus_json, max_steps, goal_tol, goal_hold, seed, render):
+def make_env(
+    task,
+    variation,
+    prep_npz,
+    zspec_json,
+    consensus_json,
+    max_steps,
+    goal_tol,
+    goal_hold,
+    seed,
+    render,
+):
     demo_snaps = load_demo_snaps(prep_npz)
     split_t = load_split_idx(consensus_json, task, variation)
     split_spec = SplitSpec(split_t=split_t)
@@ -20,7 +32,7 @@ def make_env(task, variation, prep_npz, zspec_json, consensus_json, max_steps, g
         variation=variation,
         demo_snaps=demo_snaps,
         split_spec=split_spec,
-        obs_dim=15,
+        obs_spec=DEFAULT_SUFFIX_OBS_SPEC,
         max_steps=max_steps,
         goal_tol=goal_tol,
         goal_hold_steps=goal_hold,
@@ -41,7 +53,11 @@ def main():
     ap.add_argument("--zspec_json", required=True)
     ap.add_argument("--consensus_json", required=True)
 
-    ap.add_argument("--model_dir", required=True, help="run directory containing sac_suffix.zip and vecnormalize.pkl")
+    ap.add_argument(
+        "--model_dir",
+        required=True,
+        help="run directory containing sac_suffix.zip and vecnormalize.pkl",
+    )
     ap.add_argument("--episodes", type=int, default=20)
     ap.add_argument("--max_steps", type=int, default=200)
     ap.add_argument("--goal_tol", type=float, default=0.05)
@@ -55,13 +71,27 @@ def main():
     model_path = os.path.join(args.model_dir, "sac_suffix.zip")
     norm_path = os.path.join(args.model_dir, "vecnormalize.pkl")
 
-    # Build env and VecNormalize exactly like training
     def _make():
         return make_env(
-            args.task, args.variation, args.prep_npz, args.zspec_json, args.consensus_json,
-            args.max_steps, args.goal_tol, args.goal_hold, args.seed, args.render
+            task=args.task,
+            variation=args.variation,
+            prep_npz=args.prep_npz,
+            zspec_json=args.zspec_json,
+            consensus_json=args.consensus_json,
+            max_steps=args.max_steps,
+            goal_tol=args.goal_tol,
+            goal_hold=args.goal_hold,
+            seed=args.seed,
+            render=args.render,
         )
 
+    # Probe once to print env dimensions under the shared obs contract
+    probe_env = _make()
+    print(f"[info] obs_dim={probe_env.observation_space.shape[0]}")
+    print(f"[info] act_dim={probe_env.action_space.shape[0]}")
+    probe_env.close()
+
+    # Build VecNormalize exactly like training
     venv = DummyVecEnv([_make])
     venv = VecNormalize.load(norm_path, venv)
     venv.training = False
@@ -69,7 +99,6 @@ def main():
 
     model = SAC.load(model_path, env=venv)
 
-    # Rollouts
     successes = 0
     final_ds = []
     lengths = []
@@ -78,18 +107,18 @@ def main():
         obs = venv.reset()
         done = False
         ep_steps = 0
-        last_info = None
+        last_info = {}
 
         while not done:
             action, _ = model.predict(obs, deterministic=args.deterministic)
-            obs, reward, done, info = venv.step(action)
-            ep_steps += 1
-            last_info = info[0]  # DummyVecEnv packs dicts in a list
+            obs, reward, done_arr, info = venv.step(action)
 
-            # optional: stop if wrapper reports success
-            # (your wrapper sets info["success"] when terminated)
+            done = bool(done_arr[0])
+            ep_steps += 1
+            last_info = info[0]
+
             if last_info.get("success", False):
-                break
+                done = True
 
         d = float(last_info.get("d", np.nan))
         s = bool(last_info.get("success", False))
@@ -100,8 +129,13 @@ def main():
         print(f"[ep {ep:03d}] success={s} steps={ep_steps} final_d={d:.6f}")
 
     print("\n=== Summary ===")
-    print(f"success_rate = {successes}/{args.episodes} = {successes/args.episodes:.3f}")
-    print(f"final_d: mean={np.mean(final_ds):.6f} std={np.std(final_ds):.6f} min={np.min(final_ds):.6f} max={np.max(final_ds):.6f}")
+    print(f"success_rate = {successes}/{args.episodes} = {successes / args.episodes:.3f}")
+    print(
+        f"final_d: mean={np.mean(final_ds):.6f} "
+        f"std={np.std(final_ds):.6f} "
+        f"min={np.min(final_ds):.6f} "
+        f"max={np.max(final_ds):.6f}"
+    )
     print(f"steps:   mean={np.mean(lengths):.2f}")
 
     venv.close()
