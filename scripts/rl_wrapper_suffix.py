@@ -128,13 +128,14 @@ class ReverseSuffixEnv(gym.Env):
         demo_snaps: DemoSnapshots,
         split_spec: SplitSpec,
         obs_spec: Optional[SuffixPolicyObsSpec] = None,
-        obs_dim: Optional[int] = None,            # kept only for backward compatibility
+        obs_dim: Optional[int] = None,
         action_arm_dim: int = 7,
         max_steps: int = 200,
         goal_tol: float = 0.02,
         goal_hold_steps: int = 5,
+        success_exit_tol: Optional[float] = None,
         reward_mode: str = "shaped",
-        include_z_in_obs: bool = False,           # kept only for backward compatibility
+        include_z_in_obs: bool = False,
         z_dim: Optional[int] = None,
         reset_mode: str = "final",
         zspec_json_path: str = "data/demos/BlockPyramid_var00_demo0000_prep_zspec.json",
@@ -142,9 +143,11 @@ class ReverseSuffixEnv(gym.Env):
         joint_vel_clip: float = 1.0,
         seed: int = 0,
         render: bool = False,
-        time_penalty: float = 0.01,
+        time_penalty: float = 0.001,
         action_penalty: float = 0.0005,
         grip_toggle_penalty: float = 0.001,
+        progress_scale: float = 10.0,
+        success_bonus: float = 2.0,
     ):
         super().__init__()
 
@@ -160,6 +163,10 @@ class ReverseSuffixEnv(gym.Env):
         self.max_steps = int(max_steps)
         self.goal_tol = float(goal_tol)
         self.goal_hold_steps = int(goal_hold_steps)
+        self.success_exit_tol = float(success_exit_tol) if success_exit_tol is not None else float(goal_tol) * 1.25
+        if self.success_exit_tol < self.goal_tol:
+            raise ValueError("success_exit_tol must be >= goal_tol")
+
         self.reward_mode = reward_mode
         self.reset_mode = reset_mode
         self.settle_steps = int(settle_steps)
@@ -171,6 +178,8 @@ class ReverseSuffixEnv(gym.Env):
         self.time_penalty = float(time_penalty)
         self.action_penalty = float(action_penalty)
         self.grip_toggle_penalty = float(grip_toggle_penalty)
+        self.progress_scale = float(progress_scale)
+        self.success_bonus = float(success_bonus)
         self._prev_grip_cmd = None
 
         self._env = None
@@ -184,7 +193,9 @@ class ReverseSuffixEnv(gym.Env):
 
         self._t = 0
         self._hold = 0
+        self._inside_goal_band = False
         self._d_prev = None
+        self._episode_min_d = np.inf
 
         self._last_obs = None
         self._boundary_k_row = None
@@ -307,7 +318,10 @@ class ReverseSuffixEnv(gym.Env):
         if kf.size == 0:
             raise RuntimeError("keyframe_indices is empty; cannot map split_t to a keyframe.")
 
-        k_row = int(np.argmin(np.abs(kf - split_t)))
+        # IMPORTANT FIX:
+        # use the last keyframe at or before split_t, never the nearest one
+        k_row = int(np.searchsorted(kf, split_t, side="right") - 1)
+        k_row = max(0, min(k_row, int(kf.size) - 1))
         t = int(kf[k_row])
 
         trees_1d = list(self.demo_snaps.keyframe_trees_kR[k_row, :].tolist())
@@ -378,7 +392,9 @@ class ReverseSuffixEnv(gym.Env):
 
         self._t = 0
         self._hold = 0
+        self._inside_goal_band = False
         self._d_prev = None
+        self._episode_min_d = np.inf
 
         if seed is not None:
             self._rng = np.random.default_rng(int(seed))
@@ -391,14 +407,21 @@ class ReverseSuffixEnv(gym.Env):
 
         x, d = self._make_obs()
         self._d_prev = d
-        self._prev_grip_cmd = 1.0
+        self._episode_min_d = d
+
+        # use actual restored gripper state, not a hard-coded 1.0
+        q_t, g_t = self._extract_qg_from_obs(self._last_obs)
+        self._prev_grip_cmd = 1.0 if float(g_t[0]) > 0.5 else 0.0
 
         info = {
             "d": d,
+            "min_d": d,
             "goal_tol": self.goal_tol,
+            "success_exit_tol": self.success_exit_tol,
             "split_t": int(self._split_t) if self._split_t is not None else None,
             "boundary_t": int(self._boundary_t) if self._boundary_t is not None else None,
             "boundary_k_row": int(self._boundary_k_row) if self._boundary_k_row is not None else None,
+            "boundary_gap": int(self._split_t - self._boundary_t) if (self._split_t is not None and self._boundary_t is not None) else None,
             "reset_mode": self.reset_mode,
             "obs_dim": int(self.obs_dim),
         }
@@ -428,19 +451,27 @@ class ReverseSuffixEnv(gym.Env):
 
         self._last_obs, _, _ = self._task.step(rlbench_action)
         x, d = self._make_obs()
+        self._episode_min_d = min(self._episode_min_d, d)
 
-        if d <= self.goal_tol:
+        # Hysteresis: harder to enter than to stay
+        current_tol = self.success_exit_tol if self._inside_goal_band else self.goal_tol
+        inside = d <= current_tol
+
+        if inside:
             self._hold += 1
+            self._inside_goal_band = True
         else:
             self._hold = 0
+            self._inside_goal_band = False
 
         terminated = self._hold >= self.goal_hold_steps
-        truncated = self._t >= self.max_steps
+        truncated = (not terminated) and (self._t >= self.max_steps)
 
         if self.reward_mode == "dense":
             reward = -d
         else:
-            reward = (self._d_prev - d) if self._d_prev is not None else -d
+            progress = (self._d_prev - d) if self._d_prev is not None else 0.0
+            reward = self.progress_scale * progress
 
         arm_cost = float(np.mean(np.square(arm)))
         reward -= self.time_penalty
@@ -449,13 +480,20 @@ class ReverseSuffixEnv(gym.Env):
         if grip != prev_grip:
             reward -= self.grip_toggle_penalty
 
+        if terminated:
+            reward += self.success_bonus
+
         self._prev_grip_cmd = grip
         self._d_prev = d
 
         info = {
             "t": self._t,
             "d": d,
+            "min_d": self._episode_min_d,
             "hold": self._hold,
+            "inside_goal_band": bool(self._inside_goal_band),
+            "goal_tol": self.goal_tol,
+            "success_exit_tol": self.success_exit_tol,
             "success": bool(terminated),
             "obs_dim": int(self.obs_dim),
         }
