@@ -273,6 +273,13 @@ def main():
     print(f"mean_return  = {mean_return:.4f}")
     print(f"mean_len     = {mean_len:.2f}")
 
+
+    # print("------------")
+    # for i in range(50):
+    #     print(row["d"])
+    # print("------------")
+
+
     if args.out_json is not None:
         out = {
             "task": args.task,
