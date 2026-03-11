@@ -9,3 +9,4 @@ RLBench/
 *.pkl
 runs/
 results/
+data/old/
