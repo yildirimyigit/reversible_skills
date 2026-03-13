@@ -12,7 +12,7 @@ class SuffixPolicyObsSpec:
     use_g: bool = True
     use_goal_q: bool = True
     use_goal_g: bool = True
-    use_z: bool = False
+    use_z: bool = True
     use_goal_z: bool = False
 
     def obs_dim(self, q_dim: int, z_dim: int = 0, g_dim: int = 1) -> int:
@@ -103,6 +103,6 @@ DEFAULT_SUFFIX_OBS_SPEC = SuffixPolicyObsSpec(
     use_g=True,
     use_goal_q=True,
     use_goal_g=True,   # keep this if you believe goal gripper belongs in policy input
-    use_z=False,
+    use_z=True,
     use_goal_z=False,
 )

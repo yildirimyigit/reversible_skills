@@ -204,22 +204,25 @@ class ReverseSuffixEnv(gym.Env):
 
         self.obs_spec = obs_spec if obs_spec is not None else DEFAULT_SUFFIX_OBS_SPEC
 
-        if include_z_in_obs and not (self.obs_spec.use_z or self.obs_spec.use_goal_z):
-            raise ValueError(
-                "include_z_in_obs=True but obs_spec does not include z. "
-                "Use obs_spec to control policy observation contents."
-            )
-
-        if (self.obs_spec.use_z or self.obs_spec.use_goal_z) and self._z_dim is None:
-            raise ValueError(
-                "obs_spec requests z in the policy observation, but z_dim is None."
-            )
-
         self._q_dim = 7
         self._g_dim = 1
+
+        self._init_rlbench()
+
+        self._zspec = load_zspec(zspec_json_path)
+        self._zext = ZExtractor(self._zspec)
+
+        if self.obs_spec.use_z or self.obs_spec.use_goal_z:
+            if self._z_dim is None:
+                _, obs0 = self._task.reset()
+                z0 = np.asarray(compute_z(self._task, obs0, self._zext), dtype=np.float32).ravel()
+                self._z_dim = int(z0.shape[0])
+        else:
+            self._z_dim = 0
+
         self.obs_dim = self.obs_spec.obs_dim(
             q_dim=self._q_dim,
-            z_dim=int(self._z_dim or 0),
+            z_dim=int(self._z_dim),
             g_dim=self._g_dim,
         )
 
@@ -236,11 +239,6 @@ class ReverseSuffixEnv(gym.Env):
             shape=(int(action_arm_dim) + 1,),
             dtype=np.float32,
         )
-
-        self._init_rlbench()
-
-        self._zspec = load_zspec(zspec_json_path)
-        self._zext = ZExtractor(self._zspec)
 
         if obs_dim is not None and int(obs_dim) != int(self.obs_dim):
             print(
